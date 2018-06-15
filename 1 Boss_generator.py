@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import mesh_generator
 import commontool as ct
+import geometry_builder as gb
 import os
 import sys
 
@@ -46,10 +46,10 @@ for mesh_number in range(1,101):
     pts_array =  np.array(([list(p) for p in pts])) #convert the pts corrdinates array to numpy array
    
     # 定义各面
-    f_bot = [[0,1,2,3]]#底面 0
-    f_ls = [[0,3,4,7]]#左侧面 1
+    f_bot = [[0,3,2,1]]#底面 0
+    f_ls = [[0,7,4,3]]#左侧面 1
     f_rs = [[1,2,5,6]]#右侧面 2
-    f_t = [[4,5,6,7,-1]+list(range(8,cpt_number+8))]#顶面 3
+    f_t = [[4,7,6,5,-1]+list(range(8,cpt_number+8))]#顶面 3
     f_b = [[2,3,4,5]]#front face 4
     f_f = [[0,1,6,7]]#back face  5
     #f_c1 = [list(range(8,cpt_number+8))] # 圆洞
@@ -71,17 +71,19 @@ for mesh_number in range(1,101):
             hole_facets.append([])
 
     #generate mesh
-    coord_array,tri_array = mesh_generator.mesh_tri(pts_array,facets,hole_facets,min_length)
-    print ("Boss Mesh %d, height %.2f, radius %.2f, has %d points" %(mesh_number,d2,r2,coord_array.shape[0]))
-    np.savez_compressed('input_mesh/boss/boss_%05d-1'%mesh_number, coord_array=coord_array,tri_array=tri_array.astype(np.int32))
-
-    for i in range(9): #随机旋转模型
-        axis = ct.random_axis() # 随机旋转轴
-        theta = np.random.uniform(0,np.pi*2) #随机旋转角度
-        rand_axis = ct.rotation_matrix(axis,theta) #旋转矩阵
-        new_coord_array = np.dot(rand_axis, coord_array.T).T 
-        np.savez_compressed('input_mesh/boss/boss_%05d-%d'%(mesh_number,i+2), coord_array=new_coord_array,tri_array=tri_array.astype(np.int32))
+    model = gb.solid_model(pts_array,facets,hole_facets,min_length)   
+    coord_array,tri_array = model.generate_mesh()
     
+    print ("Boss Mesh %d, height %.2f, radius %.2f, has %d points" %(mesh_number,d2,r2,coord_array.shape[0]))
+    np.savez_compressed('input_mesh/boss/boss_%05d-1'%mesh_number, model=model,coord_array=coord_array,tri_array=tri_array.astype(np.int32))
+
+    # for i in range(9): #随机旋转模型
+    #     axis = ct.random_axis() # 随机旋转轴
+    #     theta = np.random.uniform(0,np.pi*2) #随机旋转角度
+    #     rand_axis = ct.rotation_matrix(axis,theta) #旋转矩阵
+    #     new_coord_array = np.dot(rand_axis, coord_array.T).T 
+    #     np.savez_compressed('input_mesh/boss/boss_%05d-%d'%(mesh_number,i+2), model=model,coord_array=new_coord_array,tri_array=tri_array.astype(np.int32))
+    # 
 
 # # # plot to check 
 # from mayavi import mlab

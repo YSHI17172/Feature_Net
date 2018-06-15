@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import mesh_generator
+import geometry_builder as gb
 import commontool as ct
 import os
 import sys
@@ -42,7 +42,7 @@ while mesh_number < 101:
     
     # 定义各面
     f_bot = [[0,1,2,3]]#底面
-    f_ls = [[0,1,14,15]]#左侧面
+    f_ls = [[0,1,14,15]]#左侧面~/OneDrive - University of South Carolina/New
     f_rs = [[2,3,4,5]]#右侧面
     f_lt = [[12,13,14,15]]#左顶面
     f_rt = [[4,5,6,7]]#右顶面
@@ -54,29 +54,31 @@ while mesh_number < 101:
     facets = f_bot+f_ls+f_rs+f_lt+f_rt+f_f+f_b+f_sb+f_sl+f_sr
     
     #generate mesh
-    coord_array,tri_array = mesh_generator.mesh_tri(pts_array,facets)
+    model = gb.solid_model(pts_array,facets)
+    coord_array,tri_array = model.generate_mesh()
+    
     print ("Slot Mesh %d, depth %.2f, width %.2f, has %d points."%(mesh_number,d2,w2,coord_array.shape[0]))
     if coord_array.shape[0] >5000:
         print("点数过多，重来！")
         continue
-    np.savez_compressed('input_mesh/slot/slot_%05d-1'%mesh_number, coord_array=coord_array,tri_array=tri_array.astype(np.int32))
+    np.savez_compressed('input_mesh/slot/slot_%05d-1'%mesh_number, model = model,coord_array=coord_array,tri_array=tri_array.astype(np.int32))
 
-    for i in range(9): #随机旋转模型
-        axis = ct.random_axis() # 随机旋转轴
-        theta = np.random.uniform(0,np.pi*2) #随机旋转角度
-        rand_axis = ct.rotation_matrix(axis,theta) #旋转矩阵
-        new_coord_array = np.dot(rand_axis, coord_array.T).T 
-        np.savez_compressed('input_mesh/slot/slot_%05d-%d'%(mesh_number,i+2), coord_array=new_coord_array,tri_array=tri_array.astype(np.int32))
-    
+    # for i in range(9): #随机旋转模型
+    #     axis = ct.random_axis() # 随机旋转轴
+    #     theta = np.random.uniform(0,np.pi*2) #随机旋转角度
+    #     rand_axis = ct.rotation_matrix(axis,theta) #旋转矩阵
+    #     new_coord_array = np.dot(rand_axis, coord_array.T).T 
+    #     np.savez_compressed('input_mesh/slot/slot_%05d-%d'%(mesh_number,i+2), model = model,coord_array=new_coord_array,tri_array=tri_array.astype(np.int32))
+    # 
     mesh_number +=1
 
-## plot to check 
-from mayavi import mlab
-mlab.figure(figure="Mesh", bgcolor = (1,1,1), fgcolor = (0,0,0))
-#mlab.plot3d(pts[:, 0], pts[:, 1], pts[:, 2],)
-mlab.triangular_mesh(coord_array[:, 0], coord_array[:, 1], coord_array[:, 2], \
-    tri_array,representation='wireframe', color=(0, 0, 0), opacity=0.5)
-mlab.show()
+# ## plot to check 
+# from mayavi import mlab
+# mlab.figure(figure="Mesh", bgcolor = (1,1,1), fgcolor = (0,0,0))
+# #mlab.plot3d(pts[:, 0], pts[:, 1], pts[:, 2],)
+# mlab.triangular_mesh(coord_array[:, 0], coord_array[:, 1], coord_array[:, 2], \
+#     tri_array,representation='wireframe', color=(0, 0, 0), opacity=0.5)
+# mlab.show()
 
 
 

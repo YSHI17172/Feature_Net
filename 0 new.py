@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 os.chdir(sys.path[0]) #change dir to main's path  
 
 data = np.load('input_mesh/slot/slot_00052-2.npz')
+model = data['model'][()]
 tri_array = data['tri_array'].astype(np.int32) ; coord_array = data['coord_array']
 data.close()
 #coord_array, tri_array = read_dat.read_dat(part_name)

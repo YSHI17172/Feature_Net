@@ -6,6 +6,15 @@ from scipy.spatial import cKDTree
 import scipy as sp
 from itertools import combinations
 
+def is_same_sign(v):
+    """
+    check whether the numbers in the input numpy array has the same sign
+    """
+    if np.sum(np.abs(v)) == np.abs(np.sum(v)):
+        return 1
+    else:
+        return -1
+
 def divby2(n):
     """
     divide a number by 2 repeatly,until it no large than 8
@@ -63,7 +72,6 @@ def to3d_v2(pts,v,c): # 2D 坐标转换为 3D, 矩阵计算版本，提高速度
     v2 = np.column_stack((v[:, 1], v[:, 2], v[:, 0])).conj().T  # 修正顺序，保证xyz
     new = np.dot(temp,v2) # 2d 投影 3d 空间
     return new
-
 
 def connect_pts(pts,breakpoint): #把平面边界点序，转化为符合trimesh的格式
     edges = []; pn =len(pts)
@@ -131,12 +139,15 @@ def find_line_angle(facets,two_face,pts_list):
         degree+=180
     return angle,degree
 
-def line_segements_reorder(fi,facets,facets_lines_copy,lines_list_seg,lines_array):
+def line_segements_reorder(fi,facets,faces,lines,lines_list_seg):
     """
     fucntion to put segmented lines back into the face
     and reconnect them in correct order
     """
-    face = facets_lines_copy[fi] #get line index in the face 
+    face = [] #get line index in the face 
+    for lp in faces[fi].loops:
+        face += lp.line_list
+
     face_seg = [] #转face中线段号为连续点号，以便输入.但需要检查线段方向  
     break_point_loop2 = -1 #used for record loop2
     
@@ -151,7 +162,9 @@ def line_segements_reorder(fi,facets,facets_lines_copy,lines_list_seg,lines_arra
         end = lines_list_seg[face[0]][0]# 记录尾点以便后续核对
     else: #对不上
         raise ValueError('连接面%d的线段%d和线段%d时候，头尾点%s和%s对不上，请检查。'
-                        %(fi,face[0],face[1],lines_array[face[0]],lines_array[face[1]]))
+                        %(fi,face[0],face[1],
+                        (lines[face[0]].start,lines[face[0]].end),
+                        (lines[face[1]].start,lines[face[1]].end)))
     
     for i in range(1,len(face)): # 检查后续线段
         if end == lines_list_seg[face[i]][0]: # 正常
@@ -171,7 +184,9 @@ def line_segements_reorder(fi,facets,facets_lines_copy,lines_list_seg,lines_arra
                     end = lines_list_seg[face[i]][-1]
             else:
                 raise ValueError('连接面%d的线段%d和线段%d时候，头尾点%s和%s对不上，请检查。当前末点%d'
-                    %(fi,face[i-1],face[i],lines_array[face[i-1]],lines_array[face[i]],end))
+                    %(fi,face[i-1],face[i],
+                    (lines[face[i-1]].start,lines[face[i-1]].end),
+                    (lines[face[i]].start,lines[face[i]].end),end))
     return face_seg,break_point_loop2
 
 def LineSegments_3d(P1,P2,num_points=10,edge_length=-1):
@@ -189,14 +204,17 @@ def LineSegments_3d(P1,P2,num_points=10,edge_length=-1):
   vertices=[(j,j+1) for j in range(0,len(points)-1,1)]
   return points,vertices;
 
-def line_segmentation_linear(li,ref_face,P1,P2,pts_segments,lines_array,coord_array,facets_lines):
+def line_segmentation_linear(li,ref_face,P1,P2,pts_segments,coord_array,lines,faces):
     """
     为了合理减少mesh点，在分割边界时，参照对面边的距离分割。
     """
-    ref_lines = facets_lines[ref_face][:] #参照面内边,[:]means copy this list
+    ref_lines = [] #参照面内边
+    for lp in faces[ref_face].loops:
+        ref_lines += lp.line_list
+    
     ref_lines.remove(li)#排除所在边
     for ref_line in ref_lines[:]:#排除邻边,[:]means copy this list,不然remove以后由于长度减少，就会跳过一个index
-        p1_line2 = coord_array[lines_array[ref_line,0],:];p2_line2 = coord_array[lines_array[ref_line,1],:] #目标边坐标            
+        p1_line2 = coord_array[lines[ref_line].start,:];p2_line2 = coord_array[lines[ref_line].end,:] #目标边坐标            
         dist = distance_segment_to_segment(P1,P2,p1_line2,p2_line2) #find distance
         if dist < 1e-9:
             ref_lines.remove(ref_line)   
@@ -211,7 +229,7 @@ def line_segmentation_linear(li,ref_face,P1,P2,pts_segments,lines_array,coord_ar
 
         min_dist_all = []    #找到最小距离边       
         for ref_line in ref_lines:                
-            p1_line2 = coord_array[lines_array[ref_line,0],:];p2_line2 = coord_array[lines_array[ref_line,1],:] #目标边坐标            
+            p1_line2 = coord_array[lines[ref_line].start,:];p2_line2 = coord_array[lines[ref_line].end,:] #目标边坐标            
             dist = distance_segment_to_segment(p1_seg,p2_seg,p1_line2,p2_line2) #find distance
             min_dist_all.append(dist)
         min_dist = np.amin(min_dist_all)#最小距离
@@ -231,24 +249,25 @@ def line_segmentation_linear(li,ref_face,P1,P2,pts_segments,lines_array,coord_ar
     line_segments = [(j,j+1) for j in range(0,len(new_pts)-1,1)]
     return new_pts,line_segments
 
-def line_segmentation_3d(pts_list,lines_array,facets_lines,line_max_rate,line_max_rate_face,facet_min_length,min_length):
+def line_segmentation_3d(pts_list,lines,faces,min_length):
     """
     分割边长，以便生成mesh
     改进版本 3d 分割
     """
     coord_array = np.copy(pts_list) #copy 
-    lines_list_seg = [[]for i in range(lines_array.shape[0])] # for save new lines
+    lines_list_seg = [[]for i in range(len(lines))] # for save new lines
 
     # 分割边线
-    for li in range(lines_array.shape[0]):  
-        p1 = lines_array[li,0];p2 = lines_array[li,1] # point index
+    for li in range(len(lines)):  
+        ln = lines[li]
+        p1 = ln.start;p2 = ln.end # point index
         P1 = coord_array[p1,:];P2 = coord_array[p2,:] # coordinates of points
-        seg_points = line_max_rate[li] #分段数量
+        seg_points = ln.seg_rate #分段数量
         pts_segments,line_segments = LineSegments_3d(P1,P2,num_points=seg_points)  #segmentation 
         
-        ref_face = line_max_rate_face[li] #参照面--含有短边
-        if seg_points > 24 and facet_min_length[ref_face] > min_length and len(facets_lines[ref_face]) > 3: # 分段过多时，进行调整.排除含有圆边面,排除三角形         
-            pts_segments,line_segments=line_segmentation_linear(li,ref_face,P1,P2,pts_segments,lines_array,coord_array,facets_lines)
+        ref_face = ln.max_rate_face #参照面--含有短边
+        if seg_points > 24 and faces[ref_face].min_length > min_length and len(faces[ref_face].loops[0].line_list) > 3: # 分段过多时，进行调整.排除含有圆边面,排除三角形         
+            pts_segments,line_segments=line_segmentation_linear(li,ref_face,P1,P2,pts_segments,coord_array,lines,faces)
         
         offset = coord_array.shape[0]-1 # find 点序号 修正准备 
         line_segments_array =  np.array(([list(p) for p in line_segments])) #为方便加减数字转化为array
@@ -259,6 +278,7 @@ def line_segmentation_3d(pts_list,lines_array,facets_lines,line_max_rate,line_ma
         #line_segments_array[0,0] = edge[0]; line_segments_array[-1,-1] = edge[1] 
         new_line[0] = p1;new_line[-1] = p2 
         lines_list_seg[li] = new_line #save new segments as line
+        ln.segments = new_line # save new points index to original line
 
         #merge new points
         pts_segments_array = np.array(([list(p) for p in pts_segments])) # 为转3d转array

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import mesh_generator
 import commontool as ct
+import geometry_builder as gb
 import os
 import sys
 
@@ -36,8 +36,8 @@ for mesh_number in range(1,101):
     pts_array =  np.array(([list(p) for p in pts])) #convert the pts corrdinates array to numpy array
     
     # 定义各面
-    f_bot = [[0,1,2,3]]#底面
-    f_ls = [[0,3,4,5]]#左侧面
+    f_bot = [[0,3,2,1]]#底面
+    f_ls = [[0,5,4,3]]#左侧面
     f_rs = [[1,2,11,10]]#右侧面
     f_lt = [[4,5,6,7]]#左顶面
     f_rt = [[8,9,10,11]]#右顶面
@@ -47,17 +47,21 @@ for mesh_number in range(1,101):
     facets = f_bot+f_ls+f_rs+f_lt+f_rt+f_f+f_b+f_sl
         
     #generate mesh
-    coord_array,tri_array = mesh_generator.mesh_tri(pts_array,facets)
+    model = gb.solid_model(pts_array,facets)
+    coord_array,tri_array = model.generate_mesh()
+    
     print ("Step Mesh %d, height %.2f, length %.2f, has %d points."%(mesh_number,d2,w2,coord_array.shape[0]))
 
-    np.savez_compressed('input_mesh/step/step_%05d-1'%mesh_number, coord_array=coord_array,tri_array=tri_array.astype(np.int32))
+    np.savez_compressed('input_mesh/step/step_%05d-1'%mesh_number, model = model,
+    coord_array=coord_array,tri_array=tri_array.astype(np.int32))
 
-    for i in range(9): #随机旋转模型
-        axis = ct.random_axis() # 随机旋转轴
-        theta = np.random.uniform(0,np.pi*2) #随机旋转角度
-        rand_axis = ct.rotation_matrix(axis,theta) #旋转矩阵
-        new_coord_array = np.dot(rand_axis, coord_array.T).T 
-        np.savez_compressed('input_mesh/step/step_%05d-%d'%(mesh_number,i+2), coord_array=new_coord_array,tri_array=tri_array.astype(np.int32))
+    # for i in range(9): #随机旋转模型
+    #     axis = ct.random_axis() # 随机旋转轴
+    #     theta = np.random.uniform(0,np.pi*2) #随机旋转角度
+    #     rand_axis = ct.rotation_matrix(axis,theta) #旋转矩阵
+    #     new_coord_array = np.dot(rand_axis, coord_array.T).T 
+    #     np.savez_compressed('input_mesh/step/step_%05d-%d'%(mesh_number,i+2), model = model,
+    #     coord_array=new_coord_array,tri_array=tri_array.astype(np.int32))
 
 # # plot to check 
 # from mayavi import mlab
