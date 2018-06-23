@@ -249,24 +249,32 @@ def line_segmentation_linear(li,ref_face,P1,P2,pts_segments,coord_array,lines,fa
     line_segments = [(j,j+1) for j in range(0,len(new_pts)-1,1)]
     return new_pts,line_segments
 
-def line_segmentation_3d(pts_list,lines,faces,min_length):
+def line_segmentation_3d(pts_list,lines,faces,min_length,unifrom_seg,uniform_mesh,mesh_length):
     """
     分割边长，以便生成mesh
     改进版本 3d 分割
     """
     coord_array = np.copy(pts_list) #copy 
     lines_list_seg = [[]for i in range(len(lines))] # for save new lines
-
+    
+    uniform_length = np.amin([ln.length for ln in lines if ln.length > min_length])     
     # 分割边线
     for li in range(len(lines)):  
         ln = lines[li]
+        ref_face = ln.max_rate_face #参照面--含有短边
         p1 = ln.start;p2 = ln.end # point index
         P1 = coord_array[p1,:];P2 = coord_array[p2,:] # coordinates of points
         seg_points = ln.seg_rate #分段数量
+        if faces[ref_face].min_length > min_length and uniform_mesh ==True: # 只分割非圆面边 
+            seg_points = int((ln.length/uniform_length)*9+2)   
+            if 10 > mesh_length > 0: # if length is specified
+                seg_points = int((ln.length/mesh_length)+1)
+                           
         pts_segments,line_segments = LineSegments_3d(P1,P2,num_points=seg_points)  #segmentation 
-        
-        ref_face = ln.max_rate_face #参照面--含有短边
-        if seg_points > 24 and faces[ref_face].min_length > min_length and len(faces[ref_face].loops[0].line_list) > 3: # 分段过多时，进行调整.排除含有圆边面,排除三角形         
+      
+        if uniform_mesh == unifrom_seg ==False and seg_points > 20\
+        and faces[ref_face].min_length > min_length \
+        and len(faces[ref_face].loops[0].line_list) > 3: # 分段过多时，进行调整.排除含有圆边面,排除三角形         
             pts_segments,line_segments=line_segmentation_linear(li,ref_face,P1,P2,pts_segments,coord_array,lines,faces)
         
         offset = coord_array.shape[0]-1 # find 点序号 修正准备 

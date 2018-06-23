@@ -68,7 +68,7 @@ def generate_hks(coord_array, tri_array, steps=0.001, iters=1000):
         # Display what is going on every 25 iters
         if np.remainder(i+1, 100) == 0:
             t_elapsed = timeit.default_timer() - t_iter
-            print ("HKS iteration %s elapsed time %s s" %(i+1, t_elapsed))
+            #print ("HKS iteration %s elapsed time %s s" %(i+1, t_elapsed))
             # Record at what time new batch of 100 iterations begins
             t_iter = timeit.default_timer()
 
@@ -80,8 +80,8 @@ def generate_hks(coord_array, tri_array, steps=0.001, iters=1000):
 
         if i == iters-1:
             toc = timeit.default_timer()
-            t_elapsed = t_start_HKS - toc
-            print("Last HKS iteration completed.\n")
+            t_elapsed = toc - t_start_HKS
+            print("Last HKS iteration completed. Total elapsed time is %s seconds.\n"%t_elapsed)
 
     return HKS
 

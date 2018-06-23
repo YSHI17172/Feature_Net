@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
-#
-
 import numpy as np
 import math
 import datetime 
-
 
 def persistence(HKS):
     """ Determine persistence value k and level s per part point
@@ -39,9 +36,6 @@ def persistence(HKS):
     # Loop over points and calculate persistence level and value
       
     for index in range(n):
-        if index % n/20 == 0:
-            starttime = datetime.datetime.now()  
-
         # Find persistence level k
         test_thresh = (HKS[index, :] <= thresh)
         # If only True or False in test_thresh and first one is false
@@ -57,10 +51,6 @@ def persistence(HKS):
         # Store persistence level k and value s in v array
         v[index, 0] = k
         v[index, 1] = s
-        if index % (n/20) == (n/20-1): 
-            endtime = datetime.datetime.now()  
-            elapsedtime = (endtime - starttime).seconds
-            print (" %d points caculation complete. Elapsed time is %s seconds."%(index,elapsedtime))
     
     endtime_total = datetime.datetime.now()  
     elapsedtime_total = (endtime_total - starttime_total).seconds

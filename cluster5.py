@@ -28,7 +28,7 @@ def cluster5(coord_array, tri_array, simil, v):
 
     while (i.size != 0): # loop over all points in value array
         if abs( i.size / float(nopts)) <= step/10.:
-            print ("%5.2f%% points finished clustering."%(100-abs(i.size / float(nopts)*100)))
+            #print ("%5.2f%% points finished clustering."%(100-abs(i.size / float(nopts)*100)))
             step -= 1
         
         cl_list = []  

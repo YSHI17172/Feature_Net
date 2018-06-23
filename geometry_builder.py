@@ -15,9 +15,11 @@ class solid_model():
         find_adj_face(self.faces,self.lines) # update adjacent faces info for every face
         self.features = find_features(self.faces,self.lines) # collect faces to find form feature
       
-    def generate_mesh(self):
-        coord_array,lines_list_seg = ct.line_segmentation_3d(self.pts_list,self.lines,self.faces,self.min_length)  
-        coord_array,tri_array =tri_mesh(self.facets,self.faces,self.lines,coord_array,lines_list_seg,self.min_length,self.hole)
+    def generate_mesh(self,uniform_seg=False,unifrom_mesh=False,mesh_length = 0):
+        if mesh_length > 0:
+            uniform_seg=True;unifrom_mesh=True    
+        coord_array,lines_list_seg = ct.line_segmentation_3d(self.pts_list,self.lines,self.faces,self.min_length,uniform_seg,unifrom_mesh,mesh_length)  
+        coord_array,tri_array =tri_mesh(self.facets,self.faces,self.lines,coord_array,lines_list_seg,self.min_length,self.hole,unifrom_mesh,mesh_length)
         return coord_array,tri_array
                                                               
 class face():
@@ -184,8 +186,9 @@ def find_loop_type(face_type,loops,pts_list,lines):
             lp.type = 0      
     
 
-def tri_mesh(facets,faces,lines,coord_array,lines_list_seg,min_length,hole_in_facet):
+def tri_mesh(facets,faces,lines,coord_array,lines_list_seg,min_length,hole_in_facet,uniform_mesh,mesh_length):
     tri_array = np.zeros((0,3)) # 储存坐标和三角
+    uniform_length = np.amin([ln.length for ln in lines if ln.length > min_length])
     
     for fi in range(len(facets)):         
         #把分割过的线段重新组装
@@ -204,7 +207,12 @@ def tri_mesh(facets,faces,lines,coord_array,lines_list_seg,min_length,hole_in_fa
         edges = ct.connect_pts(face_seg,loop2) #输入准备,round trip connection of points
         
         if faces[fi].min_length > min_length:
-            edge_leng = faces[fi].min_length/3. #set maximal mesh length 
+            if uniform_mesh == True:
+                edge_leng = uniform_length/5.
+                if mesh_length > 0:
+                    edge_leng = mesh_length*2
+            else:
+                edge_leng = faces[fi].min_length/5. #set maximal mesh length 
         else:
             edge_leng = min_length #如果此面最小边是圆边    
         
