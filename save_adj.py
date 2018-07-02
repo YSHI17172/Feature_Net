@@ -16,13 +16,11 @@ def get_feauture_cluster_adjm(model,adjm,cluster):
     return new_adjm
     
 
-def save_txt(fname,ftype,new_adjm):
- 
-    tname = str(ftype) + fname[-10:-4]
-    
+def save_txt(fname,new_adjm):
+    rename = fname[:-4]    
     size = new_adjm.shape[0]	
     
-    clear = open('adjm/%s.txt'%tname,'w')
+    clear = open('adjm/%s.txt'%rename,'w')
     clear.close()
     
     for i in range(size):
@@ -32,6 +30,6 @@ def save_txt(fname,ftype,new_adjm):
                 format += '%.11f '
             else:
                 format += '%d '
-        with open('adjm/%s.txt'%tname,'ab') as f:
+        with open('adjm/%s.txt'%rename,'ab') as f:
             np.savetxt(f,new_adjm[i,:].reshape((1,size)),fmt=format)
         f.close()

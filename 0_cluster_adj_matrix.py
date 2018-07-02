@@ -11,17 +11,25 @@ import os
 import sys
 import matplotlib.pyplot as plt
 import save_adj
+import datetime
+
+start_time = datetime.datetime.now()
 
 os.chdir(sys.path[0]) #change dir to main's path  
 
-feature_index = 2
+feature_index = -3
 
-features = ['slot','step','boss']  
+features = ['slot','step','boss','pocket','pyramid',
+            'protrusion','through_hole','blind_hole','cone',]  
 feature_type = features[feature_index]
-files= os.listdir('input_mesh/'+feature_type);files.remove('.DS_Store') # read all file names in the folder
+files= os.listdir('input_mesh/'+feature_type);
+try:
+    files.remove('.DS_Store') # read all file names in the folder
+except:
+    pass
 
-for f_name in files:
-    
+for counter,f_name in enumerate(files):
+    part_time = datetime.datetime.now()
     data = np.load('input_mesh/'+feature_type+'/'+f_name)
     model = data['model'][()]
     tri_array = data['tri_array'].astype(np.int32) ; coord_array = data['coord_array']
@@ -60,8 +68,13 @@ for f_name in files:
         cluster_adjmap = cluster.get_attributed_cluster_adj_matrix(simil,clusters,tri_array)
         adjm = save_adj.get_feauture_cluster_adjm(model,cluster_adjmap,clusters)
         simil += 0.01
+    end_time = datetime.datetime.now()
+    elapsedtime = (end_time - part_time).seconds
+    total_time = (end_time - start_time).seconds
     print ('Adjacency Matrix has %d clusters in there.'%adjm.shape[0])
-    save_adj.save_txt(f_name,feature_index,adjm)    
+    print ('Part %d finished, taken time %s seconds, total elapsedtime is %.1f minutes.\n'
+            %(counter,elapsedtime,total_time/60))
+    save_adj.save_txt(f_name,adjm)    
     
     # #plt.pcolor(cluster_adjmap, edgecolors='k', linewidths=1)
     # # plt.xticks(range(60))

@@ -17,16 +17,17 @@ def is_same_sign(v):
 
 def divby2(n):
     """
-    divide a number by 2 repeatly,until it no large than 8
+    divide a number by 2 repeatly,until it no large than 16
     return how many times it was divided and the rest number
     """
     m=0
-    while n > 8 :
+    while n >= 16 :
         if n%2 == 0:
             m+=1
             n = n/2
         else:
-            break
+            m+=1
+            n= int(n/2)
     return m,int(n)
 
 def find_normal(pts):
@@ -121,23 +122,6 @@ def round_trip_connect(pts): # 不重新编序,线两端按点号大小排列
 
 def round_trip_connect_original(start, end):
     return [(i, i+1) for i in range(start, end)] + [(end, start)]
-
-def find_line_angle(facets,two_face,pts_list):    
-    pts1 = facets[two_face[0]] #face 1 point list
-    l1 = pts_list[pts1[1]]-pts_list[pts1[0]];l2 = pts_list[pts1[2]]-pts_list[pts1[1]]
-    norm1 = np.cross(l1,l2)
-    pts2 = facets[two_face[1]] #face 1 point list
-    l3 = pts_list[pts2[1]]-pts_list[pts2[0]];l4 = pts_list[pts2[2]]-pts_list[pts2[1]]
-    norm2 = np.cross(l3,l4)
-    angle = np.dot(norm1,norm2)/(np.linalg.norm(norm1) * np.linalg.norm(norm2))   
-    #find two points not on the edges
-    p1 = pts_list[np.setdiff1d(pts1, pts2)[0]]
-    p2 = pts_list[np.setdiff1d(pts2, pts1)[0]]
-    convex = np.dot((p2-p1),norm1)
-    degree = np.arccos(angle)*180/np.pi
-    if convex > 0: #conve edge
-        degree+=180
-    return angle,degree
 
 def line_segements_reorder(fi,facets,faces,lines,lines_list_seg):
     """

@@ -4,7 +4,7 @@ import generate_hks
 import plot_hks
 import persistence
 import plot_persistence
-import cluster
+import cluster_old
 import plot_clusters
 import connection_matrix_point
 import numpy as np
@@ -16,7 +16,7 @@ os.chdir(sys.path[0]) #change dir to main's path
 
 #part_name = "ISO/Boss2.dat"
 
-data = np.load('input_mesh/slot/slot_00052-2.npz')
+data = np.load('input_mesh/slot/slot_345.npz')
 tri_array = data['tri_array'].astype(np.int32) ; coord_array = data['coord_array']
 data.close()
 #coord_array, tri_array = read_dat.read_dat(part_name)
@@ -46,10 +46,9 @@ plot_mesh.plot_mesh(coord_array, tri_array)
 # 
 # # Find clusters
 # simil = [0.7, 0.75, 0.8, 0.85, 0.9]  # Similarity percentages
-# #simil = [0.9, 0.92, 0.94, 0.96, 0.98] 
-# clusters = cluster.cluster(coord_array, tri_array, v, simil)
+# clusters = cluster_old.cluster(coord_array, tri_array, v, simil)
 # 
-# #cluster_adjmap = cluster.get_cluster_adj_matrix(clusters[-2,:],tri_array)
+# #cluster_adjmap = cluster.get_attributed_cluster_adj_matrix(simil,clusters,tri_array)
 # #plt.pcolor(cluster_adjmap, edgecolors='k', linewidths=1)
 # # plt.xticks(range(60))
 # # plt.yticks(range(60))
@@ -57,4 +56,4 @@ plot_mesh.plot_mesh(coord_array, tri_array)
 # 
 # # Plot found clusters
 # plot_clusters.plot_clusters(coord_array, tri_array, clusters, simil)
-
+# 
