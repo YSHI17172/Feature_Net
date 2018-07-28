@@ -3,8 +3,141 @@ import numpy as np
 import math
 from scipy.sparse import coo_matrix,csc_matrix,csgraph
 from scipy.spatial import cKDTree
-import scipy as sp
-from itertools import combinations
+from shapely.geometry import Polygon
+
+def edge_loop2point_loop(edge_list):
+    """
+    function to convert edge loop into point loop
+    example: [[0,1],[1,2],[2,3],[3,0]] to [0,1,2,3]
+    """
+    ploop = []
+    if edge_list[0][0] in edge_list[1]:
+        ploop.append(edge_list[0][1])
+    else:
+        ploop.append(edge_list[0][0])
+    for i in range(1,len(edge_list)):
+        if edge_list[i][0] in edge_list[i-1]:
+            ploop.append(edge_list[i][0])
+        else:
+            ploop.append(edge_list[i][1])
+    return ploop
+
+def check_2dintersect(p1,p2):
+    """
+    function to check if two 2D polygon intersect
+    """
+    if p1.intersects(p2) and not p1.touches(p2):
+        return True
+    else:
+        return False
+
+def check_normal_directions(base_plane,coo_array,point_loop_list,face_normals):
+    """
+    function to find out correct face normal directions in a shell
+    base_plane: 3D axis of a base plane to check
+    coo_array: the cooridnates of all points in the model
+    point_loop_list: face list defined by point loop as face boundary
+    face_normals: vector list
+    """
+    project_on_base_nromal = [np.unique(np.dot(coo_array[pts_in_face,:],base_plane[:,0])) #project all pts on z axis
+                    for pts_in_face in point_loop_list]
+    length_on_base_normal  = []
+    planes_on_base_normal = []
+    for fcid,pts_list in enumerate(point_loop_list): #find out which plane parallel to xy and its distance
+        if project_on_base_nromal[fcid].size == 1:
+            length_on_base_normal.append(project_on_base_nromal[fcid][0]) # distance to xy plane
+            planes_on_base_normal.append(fcid) # face id
+    plane_numbers,plane_order = np.unique(length_on_base_normal,return_inverse=True)
+    faces_sets = [[planes_on_base_normal[order_id] for order_id in np.where(plane_order==pid)[0]] 
+                    for pid in range(plane_numbers.size)] # put original face ids on the same plane in a list
+    
+    #create polygons by 2d projection points to xy plane
+    polygons_on_base = [Polygon(project_to_plane(coo_array[point_loop_list[o],:],base_plane))
+                for o in planes_on_base_normal]
+    
+    for pid in range(1,plane_numbers.size):# check overplap to determine normal direction
+        original_fids = faces_sets[pid] #original face id on the same plane
+        for ofid in original_fids:  
+            any_overlap = False   
+            original_norm = face_normals[ofid]      
+            for pre in range(1,pid+1): #可以往前追多少层
+                for pre_fid in faces_sets[pid-pre]:
+                    if check_2dintersect(polygons_on_base[planes_on_base_normal.index(ofid)],\
+                    polygons_on_base[planes_on_base_normal.index(pre_fid)]):
+                        face_normals[ofid] = face_normals[pre_fid]*-1
+                        any_overlap = True
+                        break #当与前一个平面重叠时候，看做背靠背形成实体，所以 normal 相反
+                else: 
+                    continue
+                break #内层 break 以后，触发此 break，完整退出            
+            if not any_overlap:  # 没有发现重叠的话，normal 等同于 stock face
+                    face_normals[ofid] = face_normals[faces_sets[0][0]]
+            if not np.array_equal(face_normals[ofid], original_norm): #if norm changed, check point loop               
+                #如果面边界不是凸多边形，point loop 无法确定面方向
+                #这里处理方法是调整点的顺序，直到 find_norm 找出的和 get_norm 一致
+                point_loop_list[ofid] = roll_until_equal(point_loop_list[ofid],face_normals[ofid],coo_array)
+                
+def roll_until_equal(loop_list,normal,coo_array):
+    #如果面边界不是凸多边形，point loop 无法确定面方向
+    #这里处理方法是调整点的顺序，直到 find_norm 找出的和 get_norm 一致
+    new_norm = None
+    counter = 0   
+    while not np.array_equal(normal,new_norm):
+        new_list = loop_list[::-1] # swap pts order         
+        new_norm = find_face_norm(new_list,coo_array)    
+        new_norm /= np.linalg.norm(new_norm) 
+        if not np.array_equal(normal,new_norm): #check again
+            new_list = np.roll(new_list,-1) # roll 一下
+            new_norm = find_face_norm(new_list,coo_array)
+            new_norm /= np.linalg.norm(new_norm) 
+        counter += 1
+        if counter > len(new_list):
+            raise ValueError('面边界点定义错误！！！')
+    return list(new_list)
+    
+                      
+def get_normal_from_model(coo_array,point_loop_list):
+    """
+    check the face normal directions in xyz
+    """
+    new_point_loop_list = point_loop_list[:]
+    is_stock_face = [] # check if face is stock face
+    face_normals = []
+    for fcid,pts_list in enumerate(point_loop_list):
+        norm = find_face_norm(pts_list,coo_array)
+        norm /= np.linalg.norm(norm)
+        pts_dists = np.dot((coo_array-coo_array[pts_list[0],:]),norm)
+        fctype = is_same_sign(np.sign(pts_dists))
+        is_stock_face.append(fctype)
+        if fctype == 1: #stock face
+            if np.sum(np.sign(pts_dists)) > 0: #norm 反了,要修正
+                norm *= -1
+                new_point_loop_list[fcid] = roll_until_equal(pts_list,norm,coo_array) #swap order of points
+        face_normals.append(norm)
+    
+    xyplane = np.array([[0,0,1],[1,0,0],[0,1,0]]).T
+    yzplane = np.array([[1,0,0],[0,1,0],[0,0,1]]).T
+    xzplane = np.array([[0,1,0],[0,0,1],[1,0,0]]).T
+    
+    check_normal_directions(xyplane,coo_array,new_point_loop_list,face_normals)
+    check_normal_directions(yzplane,coo_array,new_point_loop_list,face_normals)
+    check_normal_directions(xzplane,coo_array,new_point_loop_list,face_normals)
+    
+    return face_normals,new_point_loop_list
+
+def find_face_norm(face,pts_list):
+    norm = 0
+    start = 1
+    while np.linalg.norm(norm) == 0: # 防止一条直线分两节            
+        p1 = pts_list[face[0]]
+        p2 = pts_list[face[1]]
+        v1 = p2 - p1
+        p3 = pts_list[face[start]]
+        p4 = pts_list[face[start+1]]
+        v2 = p4 - p3
+        norm = np.cross(v1,v2) 
+        start +=1      
+    return norm
 
 def is_same_sign(v):
     """

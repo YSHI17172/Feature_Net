@@ -37,7 +37,7 @@ class face():
         self.loops = find_loop(f,pts_list,lines)
         self.min_length = find_min_length(self.loops,lines) 
         self.adjacent_faces = None #list
-        self.norm = find_face_norm(f,pts_list) 
+        self.norm = ct.find_face_norm(f,pts_list) 
         self.type = find_face_type(self,pts_list) # -1 inner, 1 outer
         find_loop_type(self.type,self.loops,pts_list,lines) # update loop type   
         self.mesh_points = None # numpy array to save all mesh points index in the face    
@@ -382,19 +382,6 @@ def find_face(pts_list,facets,lines):
         faces.append(new)
     return faces    
                       
-def find_face_norm(face,pts_list):
-    norm = 0
-    start = 1
-    while np.linalg.norm(norm) == 0: # 防止一条直线分两节            
-        p1 = pts_list[face[0]]
-        p2 = pts_list[face[1]]
-        v1 = p2 - p1
-        p3 = pts_list[face[start]]
-        p4 = pts_list[face[start+1]]
-        v2 = p4 - p3
-        norm = np.cross(v1,v2) 
-        start +=1      
-    return norm
 
 def find_loop(f,pts_list,lines):
     """"定义所有的loop"""

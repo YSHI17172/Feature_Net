@@ -28,7 +28,10 @@ node_modules
 #my data file
 /input_mesh
 /ISO
+/models
 /history
 /temp
 /adjm
-/graph_2D_CNN
+/2DCNN
+/3D
+/test

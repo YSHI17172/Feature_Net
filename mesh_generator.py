@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import geometry_builder as gb
+import datetime
 
-def mesh(feature_name,mesh_length=1,random_stock=False,
+def mesh(feature_name,mesh_length=1,random_stock=False,model_only=False,
         stock_length = 100,stock_width=100, stock_height=100,
         sub_type=None):
     
@@ -16,6 +17,8 @@ def mesh(feature_name,mesh_length=1,random_stock=False,
         l1 = stock_length
         h1 = stock_height
     
+    start_time = datetime.datetime.now()
+    cpt_number = 0
     hole_facets = [];min_length=0
     if feature_name == 'slot':
         pts_array,facets = slot(w1,l1,h1)
@@ -41,14 +44,20 @@ def mesh(feature_name,mesh_length=1,random_stock=False,
         pts_array,facets,hole_facets = cone(w1,l1,h1,mesh_length)
     elif feature_name == 'dome':
         min_length = 2*mesh_length 
-        pts_array,facets,hole_facets = dome(w1,l1,h1,mesh_length)
+        pts_array,facets,hole_facets,cpt_number = dome(w1,l1,h1,mesh_length)
             
     #generate mesh
     model = gb.solid_model(pts_array,facets,hole_facets,min_length)
-    coord_array,tri_array = model.generate_mesh(mesh_length=mesh_length)
-    print ("%s Mesh, has %d points."%(feature_name,coord_array.shape[0]))
+    if model_only == False:
+        coord_array,tri_array = model.generate_mesh(mesh_length=mesh_length)
+    else:
+        coord_array = tri_array = []
+    end_time = datetime.datetime.now()
+    elapsed = (end_time-start_time).seconds
+    print ("%s Mesh Created, has %d points, taken time %d seconds.\n"
+    %(feature_name,coord_array.shape[0],elapsed))
     
-    return model,coord_array,tri_array 
+    return model,coord_array,tri_array,cpt_number,elapsed
 
 def dome(w1,l1,h1,mesh_length):
     # 确定hole的参数
@@ -71,7 +80,7 @@ def dome(w1,l1,h1,mesh_length):
     ]    
    
     cpt_number = int(2*np.pi*r2/mesh_length)+1 #圆模拟点数  
-    print (cpt_number)
+    
     pts_number = len(pts)
     pts.extend((r2 * np.cos(angle)+cx, r2 * np.sin(angle)+cy,h1) # 增加圆洞口点
             for angle in np.linspace(0, 2*np.pi, cpt_number, endpoint=False))
@@ -87,11 +96,13 @@ def dome(w1,l1,h1,mesh_length):
             seg_nb = cpt_number
         else:
             seg_nb =  int(np.pi*rad*2/mesh_length)+1
-        print (seg_nb,np.pi*2*rad/seg_nb)
+        #print (seg_nb,np.pi*2*rad/seg_nb) #segmentation number of circle at different layers
         segn_list.append(seg_nb)
         pts.extend((rad * np.cos(angle)+cx, rad * np.sin(angle)+cy,height[h]) # 增加圆洞口点
                     for angle in np.linspace(0, np.pi*2, seg_nb, endpoint=False))
-    print (segn_list)
+    
+    print ('圆孔含点%d个，半圆分%d层'%(cpt_number,len(segn_list)))
+    
     pts_array =  np.array(([list(p) for p in pts])) #convert the pts corrdinates array to numpy array
  
     # 定义各面
@@ -175,7 +186,7 @@ def dome(w1,l1,h1,mesh_length):
             facets.extend([[eptsn+prev_divn-1,eptsn+prev_divn+divn-1,eptsn+prev_divn]]) 
             facets.extend([[eptsn+prev_divn-1,eptsn+prev_divn,eptsn]])           
  
-        print(prev_divn,eptsn)
+        #print(prev_divn,eptsn)
         eptsn+=prev_divn;prev_divn=divn
          
     #补全最后三角形
@@ -192,7 +203,7 @@ def dome(w1,l1,h1,mesh_length):
         else:
             hole_facets.append([])
 
-    return pts_array,facets,hole_facets
+    return pts_array,facets,hole_facets,cpt_number
 
 def cone(w1,l1,h1,mesh_length):
     # 确定hole的参数
@@ -215,7 +226,7 @@ def cone(w1,l1,h1,mesh_length):
     (cx,cy,d2)#顶点8
     ]    
    
-    cpt_number = int(np.pi*r2/mesh_length)+1 #圆模拟点数 
+    cpt_number = int(2*np.pi*r2/mesh_length)+1 #圆模拟点数 
     pts_number = len(pts)
     
     pts.extend((r2 * np.cos(angle)+cx, r2 * np.sin(angle)+cy,h1) # 增加圆洞口点
@@ -265,7 +276,7 @@ def blind_hole(w1,l1,h1,mesh_length):
     (0,0,h1),#7
     ]    
    
-    cpt_number = int(np.pi*r2/mesh_length)+1 #圆模拟点数 
+    cpt_number = int(2*np.pi*r2/mesh_length)+1 #圆模拟点数 
     
     pts.extend((r2 * np.cos(angle)+cx, r2 * np.sin(angle)+cy,h1) # 增加圆洞口点
             for angle in np.linspace(0, 2*np.pi, cpt_number, endpoint=False))
@@ -319,7 +330,7 @@ def through_hole(w1,l1,h1,mesh_length):
     (0,0,h1),#7
     ]    
    
-    cpt_number = int(np.pi*r2/mesh_length)+1 #圆模拟点数   
+    cpt_number = int(2*np.pi*r2/mesh_length)+1 #圆模拟点数   
     pts.extend((r2 * np.cos(angle)+cx, r2 * np.sin(angle)+cy,h1) # 增加圆洞口点
             for angle in np.linspace(0, 2*np.pi, cpt_number, endpoint=False))
             
@@ -518,7 +529,7 @@ def boss(w1,l1,h1,mesh_length):
     (0,0,h1),#7
     ]    
    
-    cpt_number = int(np.pi*r2/mesh_length)+1 #圆模拟点数   
+    cpt_number = int(2*np.pi*r2/mesh_length)+1 #圆模拟点数   
 
     pts.extend((r2 * np.cos(angle)+cx, r2 * np.sin(angle)+cy,h1) # 增加圆洞口点
             for angle in np.linspace(0, 2*np.pi, cpt_number, endpoint=False))
@@ -660,20 +671,25 @@ if __name__ == "__main__":
     #print ('total feature %d'%len(model.features))
     #print ('total faces %d'%len(model.faces))
     #print ('feature has %d faces'%len(model.features[0].faces))
-    #print (model.features[0].faces)
-    
+    #print (model.features[0].faces)    
 
-    fname = 'dome'
-    for mesh_number in range(1,1000):
-        model,coord_array,tri_array = mesh(fname)
-        np.savez_compressed('input_mesh/'+fname+'/'+fname+'_%d'%(mesh_number), model = model,
+    fname = 'pyramid'
+    time = [];cpts = []
+    for mesh_number in range(0,32):
+        print ('Start to create mesh %d...'%mesh_number)
+        model,coord_array,tri_array,cpt,elapsed = mesh(fname)
+        np.savez_compressed('input_mesh/'+'/'+fname+'_%d'%(mesh_number), model = model,
         coord_array=coord_array,tri_array=tri_array.astype(np.int))
+        cpts.append(cpt);time.append(elapsed)
+    np.savez_compressed('input_mesh/cpt_time%d'%mesh_number,cpts=cpts,time=time)
+        
 
-    ## plot to check 
-    from mayavi import mlab
-    mlab.figure(figure="Mesh", bgcolor = (1,1,1), fgcolor = (0,0,0))
-    #mlab.plot3d(pts[:, 0], pts[:, 1], pts[:, 2],)
-    mlab.triangular_mesh(coord_array[:, 0], coord_array[:, 1], coord_array[:, 2], \
-        tri_array,representation='wireframe', color=(0, 0, 0), opacity=0.5)
-    mlab.show()
+# 
+#     ## plot to check 
+#     from mayavi import mlab
+#     mlab.figure(figure="Mesh", bgcolor = (1,1,1), fgcolor = (0,0,0))
+#     #mlab.plot3d(pts[:, 0], pts[:, 1], pts[:, 2],)
+#     mlab.triangular_mesh(coord_array[:, 0], coord_array[:, 1], coord_array[:, 2], \
+#         tri_array,representation='wireframe', color=(0, 0, 0), opacity=0.5)
+#     mlab.show()
     
