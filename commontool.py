@@ -1,9 +1,68 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import math
-from scipy.sparse import coo_matrix,csc_matrix,csgraph
+from scipy.sparse import coo_matrix,csc_matrix
 from scipy.spatial import cKDTree
 from shapely.geometry import Polygon
+
+def list_unique_without_changing_order(alist):
+    """
+    [3,3,1,1] to [3,1]
+    """ 
+    used = set()
+    return [p for p in alist if p not in used and (used.add(p) or True)]
+
+def tee(alist):
+    """
+    [0,1,2,3] to [(0,1),(1,2),(2,3),(3,0)]
+    """
+    rolled = alist[1:]
+    rolled.append(alist[0])
+    return list(zip(alist,rolled))
+
+def point_loop_to_line_loop(facet):
+    """
+    [0,1,2,3] to  [((0, 1), (1, 2)), ((1, 2), (2, 3)), ((2, 3), (3, 0)), ((3, 0), (0, 1))]
+    """
+    lines = tee(facet)
+    line_pair = tee(lines)
+    return line_pair
+
+def get_angle_between_two_vectors(v1,v2,normal):
+    angle = np.arccos(np.dot(v1,v2)/(np.linalg.norm(v1) * np.linalg.norm(v2))) # 圆弧夹角  
+    if 0 < angle < np.pi and isAntiParallel(np.cross(v1,v2),normal): # 当夹角大于180时候，需要处理
+        angle = np.pi*2 - angle
+    return angle
+
+def isOrthogonal(v1,v2,epsilon=1e-9):
+    """
+    function to check if two vector are orthogonal
+    """
+    cos = abs(np.dot(v1,v2)/(np.linalg.norm(v1) * np.linalg.norm(v2)))
+    if cos < epsilon:
+        return True
+    else:
+        return False
+
+def isParallel(v1,v2,epsilon = 1e-9):
+    """
+    function to check if two vector are parallel
+    """
+    cos = np.dot(v1,v2)/(np.linalg.norm(v1) * np.linalg.norm(v2)) + epsilon
+    if cos > 1:
+        return True
+    else:
+        return False
+
+def isAntiParallel(v1,v2,epsilon=1e-9):
+    """
+    function to check if two vector are antiparallel
+    """
+    cos = np.dot(v1,v2)/(np.linalg.norm(v1) * np.linalg.norm(v2)) - epsilon
+    if cos < -1:
+        return True
+    else:
+        return False
 
 def edge_loop2point_loop(edge_list):
     """
@@ -11,26 +70,94 @@ def edge_loop2point_loop(edge_list):
     example: [[0,1],[1,2],[2,3],[3,0]] to [0,1,2,3]
     """
     ploop = []
-    if edge_list[0][0] in edge_list[1]:
-        ploop.append(edge_list[0][1])
-    else:
-        ploop.append(edge_list[0][0])
-    for i in range(1,len(edge_list)):
-        if edge_list[i][0] in edge_list[i-1]:
-            ploop.append(edge_list[i][0])
+    if len(edge_list) == 1: #只有一条边，必然是完整圆
+        ploop = edge_list[0]
+    elif len(edge_list) == 2: #只有2条线，圆弧或直线
+        if len(edge_list[0]) > 2: #圆弧
+            ploop.extend(edge_list[0])
+            if len(edge_list[1]) > 2: #又是一个圆弧
+                if edge_list[0][0] in edge_list[1] and edge_list[0][-1] in edge_list[1]:
+                    if edge_list[0][0] == edge_list[1][-1]:
+                        ploop.extend(edge_list[1][1:-1])
+                    elif edge_list[0][0] == edge_list[1][0]:
+                        ploop.extend(edge_list[1][1:-1][::-1])
+                    else:
+                        raise NameError("检查Loop的定义%s"%edge_list)  
+                else: #洞  
+                    ploop.append(-1)
+                    ploop.extend(edge_list[1])
+        elif len(edge_list[0]) == 2:# 直线
+            ploop.extend(edge_list[1])
         else:
-            ploop.append(edge_list[i][1])
+            raise NameError("检查Loop的定义%s"%edge_list)            
+    else:
+        if edge_list[0][0] in edge_list[1]: #如果线段1的0点在，线段2中
+            ploop.append(edge_list[0][-1])
+            if len(edge_list[0]) > 2:
+                ploop.extend(edge_list[0][1:-1][::-1])
+        elif edge_list[0][-1] in edge_list[1]:#线段1的-1点在线段2中
+            ploop.append(edge_list[0][0])
+            if len(edge_list[0]) > 2:
+                ploop.extend(edge_list[0][1:-1])
+        else: #如果都不在说明线段1是完整loop
+            ploop.extend(edge_list[0])
+            
+        for i in range(1,len(edge_list)):
+            if edge_list[i][0] in edge_list[i-1]:
+                ploop.append(edge_list[i][0])
+                if len(edge_list[i]) > 2:
+                    ploop.extend(edge_list[i][1:-1])
+            elif edge_list[i][-1] in edge_list[i-1]:
+                ploop.append(edge_list[i][-1])
+                if len(edge_list[i]) > 2:
+                    ploop.extend(edge_list[i][1:-1][::-1])
+            else: # two separated loop
+                ploop.append(-1)
+                if i == len(edge_list)-1:#如果另一loop只剩一个边
+                     ploop.extend(edge_list[i])
+                else:
+                    if edge_list[i][0] in edge_list[i+1]:
+                        ploop.append(edge_list[i][-1])
+                        if len(edge_list[i]) > 2:
+                            ploop.extend(edge_list[i][1:-1][::-1])
+                    else:
+                        ploop.append(edge_list[i][0])        
+                        if len(edge_list[i]) > 2:
+                            ploop.extend(edge_list[i][1:-1])           
     return ploop
 
 def check_2dintersect(p1,p2):
     """
     function to check if two 2D polygon intersect
     """
+    # import matplotlib.pyplot as plt  
+    # plt.figure()
+    # p1_pts =  np.array(p1.exterior.coords)
+    # p2_pts =  np.array(p2.exterior.coords)
+    # plt.plot(p1_pts[:, 0], p1_pts[:, 1]) 
+    # plt.plot(p2_pts[:, 0], p2_pts[:, 1]) 
+    # plt.show()
+    # print(list(p1.exterior.coords))
+    # print(list(p2.exterior.coords))
+    # print('--------')
+   
     if p1.intersects(p2) and not p1.touches(p2):
         return True
     else:
         return False
 
+def remove_minus_one(pts_list):
+    return [i for i in pts_list if i >= 0]
+
+def create_2d_polygon(pts_list,coo_array,base_plane):  
+    if -1 in pts_list:
+        cut_point = pts_list.index(-1)            
+        loop1 = pts_list[:cut_point]
+        loop2 = pts_list[cut_point+1:]
+        return Polygon(project_to_plane(coo_array[loop1],base_plane),[project_to_plane(coo_array[loop2],base_plane)])
+    else:
+        return Polygon(project_to_plane(coo_array[pts_list],base_plane))
+    
 def check_normal_directions(base_plane,coo_array,point_loop_list,face_normals):
     """
     function to find out correct face normal directions in a shell
@@ -39,7 +166,7 @@ def check_normal_directions(base_plane,coo_array,point_loop_list,face_normals):
     point_loop_list: face list defined by point loop as face boundary
     face_normals: vector list
     """
-    project_on_base_nromal = [np.unique(np.dot(coo_array[pts_in_face,:],base_plane[:,0])) #project all pts on z axis
+    project_on_base_nromal = [np.unique(np.dot(coo_array[remove_minus_one(pts_in_face),:],base_plane[:,0])) #project all pts on z axis
                     for pts_in_face in point_loop_list]
     length_on_base_normal  = []
     planes_on_base_normal = []
@@ -52,7 +179,7 @@ def check_normal_directions(base_plane,coo_array,point_loop_list,face_normals):
                     for pid in range(plane_numbers.size)] # put original face ids on the same plane in a list
     
     #create polygons by 2d projection points to xy plane
-    polygons_on_base = [Polygon(project_to_plane(coo_array[point_loop_list[o],:],base_plane))
+    polygons_on_base = [create_2d_polygon(point_loop_list[o],coo_array,base_plane)
                 for o in planes_on_base_normal]
     
     for pid in range(1,plane_numbers.size):# check overplap to determine normal direction
@@ -81,19 +208,28 @@ def roll_until_equal(loop_list,normal,coo_array):
     #如果面边界不是凸多边形，point loop 无法确定面方向
     #这里处理方法是调整点的顺序，直到 find_norm 找出的和 get_norm 一致
     new_norm = None
+    
+    if -1 in loop_list: #面有洞
+        cut_point = loop_list.index(-1)            
+        new_list = loop_list[:cut_point]
+        loop2 = [-1] + loop_list[cut_point+1:]
+    else:
+        new_list = loop_list[:]
+        loop2 = []
+    
     counter = 0   
     while not np.array_equal(normal,new_norm):
-        new_list = loop_list[::-1] # swap pts order         
+        new_list = new_list[::-1] # swap pts order         
         new_norm = find_face_norm(new_list,coo_array)    
         new_norm /= np.linalg.norm(new_norm) 
         if not np.array_equal(normal,new_norm): #check again
-            new_list = np.roll(new_list,-1) # roll 一下
+            new_list = np.roll(new_list,-1*counter-1) # roll 一下
             new_norm = find_face_norm(new_list,coo_array)
             new_norm /= np.linalg.norm(new_norm) 
         counter += 1
         if counter > len(new_list):
             raise ValueError('面边界点定义错误！！！')
-    return list(new_list)
+    return list(new_list)+loop2
     
                       
 def get_normal_from_model(coo_array,point_loop_list):
@@ -308,18 +444,18 @@ def line_segements_reorder(fi,facets,faces,lines,lines_list_seg):
 
 def LineSegments_3d(P1,P2,num_points=10,edge_length=-1):
   
-  number_points=num_points
-  if edge_length>0:
-    p1=np.array(P1)
-    p2=np.array(P2)
-    number_points=np.floor(np.sqrt(np.sum((p2-p1)**2))/edge_length)+1
+    number_points=num_points
+    if edge_length>0:
+        p1=np.array(P1)
+        p2=np.array(P2)
+        number_points=np.floor(np.sqrt(np.sum((p2-p1)**2))/edge_length)+1
     if number_points < 2:
         number_points = 2
   
-  t=np.linspace(0,1,number_points)
-  points=[(P1[0]+param*(P2[0]-P1[0]),P1[1]+param*(P2[1]-P1[1]),P1[2]+param*(P2[2]-P1[2])) for param in t]
-  vertices=[(j,j+1) for j in range(0,len(points)-1,1)]
-  return points,vertices;
+    t=np.linspace(0,1,number_points)
+    points=[(P1[0]+param*(P2[0]-P1[0]),P1[1]+param*(P2[1]-P1[1]),P1[2]+param*(P2[2]-P1[2])) for param in t]
+    vertices=[(j,j+1) for j in range(0,len(points)-1,1)]
+    return points,vertices;
 
 def line_segmentation_linear(li,ref_face,P1,P2,pts_segments,coord_array,lines,faces):
     """
@@ -382,10 +518,11 @@ def line_segmentation_3d(pts_list,lines,faces,min_length,unifrom_seg,uniform_mes
         p1 = ln.start;p2 = ln.end # point index
         P1 = coord_array[p1,:];P2 = coord_array[p2,:] # coordinates of points
         seg_points = ln.seg_rate #分段数量
-        if faces[ref_face].min_length > min_length and uniform_mesh ==True: # 只分割非圆面边 
-            seg_points = int((ln.length/uniform_length)*9+2)   
-            if 10 > mesh_length > 0: # if length is specified
-                seg_points = int((ln.length/mesh_length)+1)
+        #if faces[ref_face].min_length > min_length and uniform_mesh ==True: # 只分割非圆面边
+        if ln.length > min_length and uniform_mesh ==True: # 只分割非圆面边 
+            seg_points = int((ln.length/uniform_length)*9+2)  #如果没有指定长度，按与最短边的比例
+            if  mesh_length > 0: # if length is specified
+                seg_points = int(ln.length/mesh_length)+1
                            
         pts_segments,line_segments = LineSegments_3d(P1,P2,num_points=seg_points)  #segmentation 
       
@@ -396,7 +533,7 @@ def line_segmentation_3d(pts_list,lines,faces,min_length,unifrom_seg,uniform_mes
         
         offset = coord_array.shape[0]-1 # find 点序号 修正准备 
         line_segments_array =  np.array(([list(p) for p in line_segments])) #为方便加减数字转化为array
-        line_segments_array += offset #修正序号       
+        line_segments_array += offset #修正序号      
         new_line = list(np.unique(line_segments_array)) #flattened and sorted, start from 0 [0,1,2...]
         
         #复原首尾点序号

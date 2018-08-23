@@ -48,6 +48,10 @@ def cluster_cell_values(tri, cell_point_values):
     return clus_face_val
 
 if __name__ == "__main__":
+    import os
+    import sys
+    
+    os.chdir(sys.path[0]) #change dir to main's path  
     data = np.load('temp/coo.npz')
     clusters = np.load('temp/clusters.npz')['clusters']
     tri_array = data['tri_array'] ; coord_array = data['coord_array']
