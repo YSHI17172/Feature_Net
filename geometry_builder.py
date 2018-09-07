@@ -20,13 +20,14 @@ class solid_model():
         self.faces = find_face(pts_list,facets,self.lines) # all face objects    
         find_line_attributes(self.faces,self.lines,min_length,facets,pts_list) # update line attributes
         find_loop_concavity(self.faces,self.lines) #update loop concavity
-        find_adj_face(self.faces,self.lines) # update adjacent faces info for every face
+        find_adj_face(self.faces,self.lines,self.pts_list) # update adjacent faces info for every face
         self.features = find_features(self.faces,self.lines) # collect faces to find form feature
 
     def generate_mesh(self,uniform_seg=False,unifrom_mesh=False,mesh_length = 0):
         if mesh_length > 0:
             uniform_seg=True;unifrom_mesh=True    
         coord_array,lines_list_seg = ct.line_segmentation_3d(self.pts_list,self.lines,self.faces,self.min_length,uniform_seg,unifrom_mesh,mesh_length)  
+        for li,ln in enumerate(self.lines): ln.segments = lines_list_seg[li] #update line seg info
         coord_array,tri_array = tri_mesh(self.facets,self.faces,self.lines,coord_array,lines_list_seg,self.min_length,self.hole,unifrom_mesh,mesh_length)
         return coord_array,tri_array
                                                               
@@ -37,6 +38,7 @@ class face():
         self.loops = find_loop(f,pts_list,lines)
         self.min_length = find_min_length(self.loops,lines) 
         self.adjacent_faces = None #list
+        self.angle_between_adjacent_face = None #list
         self.norm = ct.find_face_norm(f,pts_list) 
         self.type = find_face_type(self,pts_list) # -1 inner, 1 outer
         find_loop_type(self.type,self.loops,pts_list,lines) # update loop type   
@@ -62,6 +64,7 @@ class line():
         self.parent_faces = None # list 
         self.type = None # -1 inner, 1 outer
         self.segments = None # list [0,15,16,17,18,1] new points of segmentation
+        self.concavity = None # 1 convex -1 concave 0 flat
 
 class point():
     def __init__(self,p):
@@ -70,8 +73,10 @@ class point():
         self.z = p[2]
 
 class feature():
-    def __init__(self,faces_in_feature,loop):
+    def __init__(self,faces_in_feature,loop,entrance,entrance_type):
         self.faces = faces_in_feature
+        self.entrance_faces = entrance
+        self.entrance_type = entrance_type
         if loop.type == -1 and loop.concavity == 1:
             self.type = 1 # convex inner feature, such as protrusion
         elif loop.type == -1 and loop.concavity == -1:
@@ -84,24 +89,26 @@ class feature():
 def find_features(faces,lines):
     features = []
     for fc in faces:
-        for lp in fc.loops: 
-            faces_in_feature = [fc.ID]
-            if lp.type == -1: # inner loop  
-                for ln in lp.line_list:
-                    for fs in lines[ln].parent_faces:
-                        if fs not in faces_in_feature: 
-                            faces_in_feature.append(fs)                                        
-                            find_next_adj_face(fs,faces,faces_in_feature)                   
-            elif lp.type == 0: #hybrid loop has inner edge
-                for ln in lp.line_list:
-                    if lines[ln].type == -1: # inner line
+        if fc.type == 1: #stock face
+            for lp in fc.loops: 
+                faces_in_feature = [fc.ID]
+                entrance = [fc.ID];entrance_type = [lp.type]
+                if lp.type == -1: # inner loop  
+                    for ln in lp.line_list:
                         for fs in lines[ln].parent_faces:
-                            if fs not in faces_in_feature:
-                                faces_in_feature.append(fs)                                    
-                                find_next_inner_adj_face(fs,faces,faces_in_feature)
-            faces_in_feature = np.setdiff1d(faces_in_feature,fc.ID) # remove base face
-            if duplicate_check(faces_in_feature,features) and len(faces_in_feature) > 0:
-                features.append(feature(faces_in_feature,lp)) # create object 
+                            if fs not in faces_in_feature: 
+                                faces_in_feature.append(fs)                                        
+                                find_next_inner_adj_face(fs,faces,faces_in_feature,entrance,entrance_type)                   
+                elif lp.type == 0: #hybrid loop has inner edge
+                    for ln in lp.line_list:
+                        if lines[ln].type == -1: # inner line
+                            for fs in lines[ln].parent_faces:
+                                if fs not in faces_in_feature:
+                                    faces_in_feature.append(fs)                                    
+                                    find_next_inner_adj_face(fs,faces,faces_in_feature,entrance,entrance_type)
+                faces_in_feature = np.setdiff1d(faces_in_feature,fc.ID) # remove base face
+                if duplicate_check(faces_in_feature,features) and len(faces_in_feature) > 0:
+                    features.append(feature(faces_in_feature,lp,entrance,entrance_type)) # create object 
     return features
 
 def duplicate_check(faces_in_feature,features):
@@ -116,14 +123,16 @@ def find_next_adj_face_unidirection(fs,faces,faces_in_feature):
     adj_fs = faces[fs].adjacent_faces[1]
     if adj_fs not in faces_in_feature:
         faces_in_feature.append(adj_fs)
-        find_next_adj_face(adj_fs,faces,faces_in_feature)                                                                      
+        find_next_adj_face_unidirection(adj_fs,faces,faces_in_feature)                                                                      
                                                                                             
-def find_next_inner_adj_face(fs,faces,faces_in_feature):
+def find_next_inner_adj_face(fs,faces,faces_in_feature,entrance,entrance_type):
     """collect adjacent faces recursively, only add inner face"""
     for adj_fs in faces[fs].adjacent_faces:
         if (adj_fs not in faces_in_feature) and faces[adj_fs].type == -1:
             faces_in_feature.append(adj_fs)
-            find_next_inner_adj_face(adj_fs,faces,faces_in_feature)  
+            find_next_inner_adj_face(adj_fs,faces,faces_in_feature,entrance,entrance_type)  
+        if (adj_fs not in entrance) and faces[adj_fs].type == 1:
+            entrance.append(adj_fs);entrance_type.append(faces[adj_fs].loops[-1].type)
                              
 def find_next_adj_face(fs,faces,faces_in_feature):   
     """collect adjacent faces recursively"""
@@ -132,14 +141,17 @@ def find_next_adj_face(fs,faces,faces_in_feature):
             faces_in_feature.append(adj_fs)
             find_next_adj_face(adj_fs,faces,faces_in_feature)                                                      
                                                    
-def find_adj_face(faces,lines):
+def find_adj_face(faces,lines,pts_list):
     """find adjacent faces for every face"""
     for fa in faces:
         adj_face = []
+        adj_angles = []
         for lp in fa.loops:
             for ln in lp.line_list:
-                adj_face.extend(lines[ln].parent_faces)
-        fa.adjacent_faces = np.setdiff1d(adj_face,fa.ID) 
+                adj_face.extend(np.setdiff1d(lines[ln].parent_faces,fa.ID))
+                adj_angles.append(lines[ln].angle)
+        fa.adjacent_faces = adj_face 
+        fa.angle_between_adjacent_face = adj_angles
                                     
 def find_loop_concavity(faces,lines):
     """ check the concavity of the loop"""
@@ -169,30 +181,58 @@ def find_face_type(face,pts_list):
                   
 def find_loop_type(face_type,loops,pts_list,lines):
     """ check whether the loop is inner loop"""
-    points = np.unique([[lines[li].start,lines[li].end] for lp in loops
-                        for li in lp.line_list ]) # find all points in the face     
-    for lp in loops:
-        line_types = []    
-        for li in lp.line_list:
-            line_vector = lines[li].vector
-            cross_products = []
-            for p in points: # 检查loop 内其他点是否在线的两侧存在
-                if p != lines[li].start and p != lines[li].end:
-                    new_vector = pts_list[p,:]- pts_list[lines[li].start,:]
-                    cross = np.cross(line_vector,new_vector)
-                    cross_products.append(cross)
-                    if np.linalg.norm(cross) != 0: #防止三点落一线             
-                        norm = cross/np.linalg.norm(cross)
-            direction = np.dot(cross_products,norm)
-            ln_type = ct.is_same_sign(np.sign(direction)) #np.sign transform vector to -1 0 1
-            line_types.append(ln_type)
-        line_types = np.array(line_types)
-        if np.all(line_types > 0): # all outer or inner lines
-            lp.type = 1
-        elif np.all(line_types <0):# inner loop
+    if face_type == -1: #inner face
+        if len(loops) == 1: # only one loop
+            loops[0].type = 1
+        else: # more than one loop
+            points = np.unique([[lines[li].start,lines[li].end] for lp in loops
+                                for li in lp.line_list ]) # find all points in the face     
+            for lp in loops:
+                line_types = []    
+                for li in lp.line_list:
+                    line_vector = lines[li].vector
+                    cross_products = []
+                    for p in points: # 检查loop 内其他点是否在线的两侧存在
+                        if p != lines[li].start and p != lines[li].end:
+                            new_vector = pts_list[p,:]- pts_list[lines[li].start,:]
+                            cross = np.cross(line_vector,new_vector)
+                            cross_products.append(cross)
+                            if np.linalg.norm(cross) != 0: #防止三点落一线             
+                                norm = cross/np.linalg.norm(cross)
+                    direction = np.dot(cross_products,norm)
+                    ln_type = ct.is_same_sign(np.sign(direction)) #np.sign transform vector to -1 0 1
+                    line_types.append(ln_type)
+                line_types = np.array(line_types)
+                if np.all(line_types <0):# inner loop
+                    lp.type = -1
+                else: 
+                    lp.type = 1 
+ 
+    else: #outter face
+        points = np.unique([[lines[li].start,lines[li].end] for lp in loops
+                            for li in lp.line_list ]) # find all points in the face     
+        for lp in loops:
+            line_types = []    
+            for li in lp.line_list:
+                line_vector = lines[li].vector
+                cross_products = []
+                for p in points: # 检查loop 内其他点是否在线的两侧存在
+                    if p != lines[li].start and p != lines[li].end:
+                        new_vector = pts_list[p,:]- pts_list[lines[li].start,:]
+                        cross = np.cross(line_vector,new_vector)
+                        cross_products.append(cross)
+                        if np.linalg.norm(cross) != 0: #防止三点落一线             
+                            norm = cross/np.linalg.norm(cross)
+                direction = np.dot(cross_products,norm)
+                ln_type = ct.is_same_sign(np.sign(direction)) #np.sign transform vector to -1 0 1
+                line_types.append(ln_type)
+            line_types = np.array(line_types)
+            if np.all(line_types > 0): # all outer or inner lines
+                lp.type = 1
+            elif np.all(line_types <0):# inner loop
                 lp.type = -1 
-        else:# hybrid loop
-            lp.type = 0      
+            else:# hybrid loop
+                lp.type = 0   
     
 
 def tri_mesh(facets,faces,lines,coord_array,lines_list_seg,min_length,hole_in_facet,uniform_mesh,mesh_length):
@@ -305,8 +345,9 @@ def find_line_attributes(faces,lines,min_length,facets,pts_list):
         lines[li].max_rate_face = min_face
           
         #find angle
-        angle,degree = find_line_angle(faces,two_face,pts_list)
+        angle,degree,convex = find_line_angle(faces,lines[li],pts_list)
         lines[li].angle = degree
+        lines[li].concavity = convex
         
         #find line type
         ft1 = faces[two_face[0]].type; ft2 = faces[two_face[1]].type
@@ -315,12 +356,15 @@ def find_line_attributes(faces,lines,min_length,facets,pts_list):
         else:
             lines[li].type = -1
 
-def find_line_angle(faces,two_face,pts_list): 
+def find_line_angle(faces,line,pts_list): 
+    two_face = line.parent_faces
     norm1 = faces[two_face[0]].norm
     norm2 = faces[two_face[1]].norm   
     angle = np.dot(norm1,norm2)/(np.linalg.norm(norm1) * np.linalg.norm(norm2)) 
     if abs(angle) >1:
         angle = np.sign(angle) # bug fix, sometimes angle > 1
+    degree = np.arccos(angle)*180/np.pi    
+        
     pts1 = faces[two_face[0]].points_id #face 0 point list
     pts2 = faces[two_face[1]].points_id #face 1 point list
     if pts1 == pts2:
@@ -328,15 +372,44 @@ def find_line_angle(faces,two_face,pts_list):
         print (pts1,pts2)
         print (two_face)
         print (len(faces))
-    #find two points not on the edges
-    p1 = pts_list[np.setdiff1d(pts1, pts2)[0]]
-    p2 = pts_list[np.setdiff1d(pts2, pts1)[0]]
-    convex = np.dot((p2-p1),norm1)
-    degree = np.arccos(angle)*180/np.pi
+    # #find two points not on the edges
+    # p1 = pts_list[np.setdiff1d(pts1, pts2)[0]]
+    # p2 = pts_list[np.setdiff1d(pts2, pts1)[0]]
+    # convex = np.dot((p2-p1),norm1)
+    
+    #平面不规则相切时候，可能无法正确判断 concavity
+    #解决方法：在 line 上选一点，为line 方向上此面最远点。然后投影此点的另一条线到另外一个面的法线方向
+    projection_on_face2 = np.dot(pts_list[pts1],norm2)
+    projection_sign = np.sign(projection_on_face2 - np.dot(pts_list[pts2],norm2)[0])
+    if np.unique(projection_sign).size > 2:# -1,0,1,face 2 切割了 face 1
+        pts3 = pts2;pts4 = pts1;convex_norm = norm1 #在face2中选点
+    else:
+        pts3 = pts1;pts4 = pts2;convex_norm = norm2#在face1中选点
+    start = pts_list[line.start] ; end = pts_list[line.end]
+    line_vector = line.vector/np.linalg.norm(line.vector)
+    projection_on_edge = np.dot(pts_list[pts3],line_vector)
+    if np.amax(projection_on_edge) == np.dot(end,line_vector): #end为原 edge 点
+        p1 = end
+        p1_idx = pts3.index(line.end)
+    else:
+        p1 = start
+        p1_idx = pts3.index(line.start)
+    if pts3[p1_idx-1] not in pts4:
+        p2_idx = pts3[p1_idx-1]
+    else:
+        if p1_idx == len(pts3) - 1: #p1正好是loop list 最后一个点
+            p2_idx = pts3[0]
+        else:
+            p2_idx = pts3[p1_idx+1]
+    p2 = pts_list[p2_idx]
+    convex = np.dot((p2-p1),convex_norm)
+    
+    # if 7 in two_face:
+    #     print(two_face,p1,p2,convex)
 
-    if convex > 0: #conve edge
+    if convex < 0: #concave edge
         degree+=180
-    return angle,degree            
+    return angle,degree,np.sign(convex)     
     
 def find_line_list(lp,lines):
     """"定位loop中有哪些线,返回index list"""
@@ -410,28 +483,29 @@ def find_min_length(loops,lines):
     return minl
             
 if __name__ == "__main__":                    
-    from read_step import read_STEP 
+    from read_STEP import read_STEP,closed_shell,get_facets 
     hole_facets = []
-    pts_array,facets = read_STEP('3D/'+'slot&pocket_0.step')   
-
-    model = solid_model(pts_array,facets,hole_facets,min_length=0)
+    data = read_STEP('3D/'+'blind_hole&through_hole_0.step')   
+    step_model = closed_shell(data)
+    pts_array,facets,hole_facets = get_facets(step_model,mesh_length=1)
+    model = solid_model(pts_array,facets,hole_facets,min_length=1.5)
     #coord_array,tri_array = model.generate_mesh()
     print ('total feature %d'%len(model.features))
     print ('total faces %d'%len(model.faces))
 
-    for i in range(len(model.features)):
-        print (len(model.features[i].faces))
-        print (model.features[i].faces)
-        print ('')
-
-    for face in model.faces:
-        print(face.ID)
-        print('face type',face.type)
-        # for loop in face.loops:
-        #     print(loop.line_list)
-        #     print('type',loop.type)
-        print('')
-    
+#     for i in range(len(model.features)):
+#         print (len(model.features[i].faces))
+#         print (model.features[i].faces)
+#         print ('')
+# 
+#     for face in model.faces:
+#         print(face.ID)
+#         print('face type',face.type)
+#         for loop in face.loops:
+#             print(loop.line_list)
+#             print('type',loop.type)
+#         print('')
+#     
     # from mayavi import mlab
     # mlab.figure(figure="Mesh", bgcolor = (1,1,1), fgcolor = (0,0,0))
     # mlab.triangular_mesh(coord_array[:, 0], coord_array[:, 1], coord_array[:, 2], \

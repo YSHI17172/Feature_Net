@@ -60,18 +60,102 @@ def read_STEP(path):
 class closed_shell():    
     def __init__(self,data):
         self.faces = find_face(data) 
-        self.face_list = None
         self.coo_array = None
-        self.hole_facets = None
-
+        self.facets = None
+        self.hole_in_facets = None
+        self.line_list = None
+        
+    def get_facets(self,mesh_length=1):
+        line_key_list,line_type_list,line_vertex_id_list,pts_xyz_list = get_line_list(self,mesh_length)
+        coo_array = np.array(pts_xyz_list) #方便加减
+        face_list = [];face_normal_list = []
+        for fc in self.faces:
+            face_center = fc.face_geometry.support_point    
+            face_center_xyz = np.array([face_center.x,face_center.y,face_center.z])
+            face_normal = fc.face_geometry.normal
+            face_normal_xyz = np.array([face_normal.x,face_normal.y,face_normal.z]) 
+            face_reference_direction = fc.face_geometry.reference_direction
+            face_reference_direction_xyz = np.array([face_reference_direction.x,face_reference_direction.y,face_reference_direction.z]) 
+                
+            face_bounds = []
+            for bidx,bound in enumerate(fc.bounds):#find index of edge in line_list
+                face_boudary_edge_list = [];edge_curve_list = []
+                if bidx > 0: face_bounds.append(-1)            
+                for oriented_edge in bound.edge_list:
+                    edge_curve = oriented_edge.element
+                    edge_curve_list.append(edge_curve)
+                    edge_curve_idx = line_key_list.index(edge_curve.key)
+                    face_boudary_edge_list.append(edge_curve_idx)
+    
+                if fc.type == 'CYLINDRICAL_SURFACE':
+                    face_radius = fc.face_geometry.radius
+                    # find out circle edge index 
+                    circle_edge = [edge_idx for edge_idx in face_boudary_edge_list if line_type_list[edge_idx] == 'CIRCLE']
+                    
+                    #check if there is complete circle in the face
+                    circle_list = [ec for ec in edge_curve_list if ec.type == 'CIRCLE']
+                    whole_circle = check_whole_circle(circle_list) 
+                        
+                    if len(circle_edge) == 2: #圆柱面只有2个圆弧
+                        cylindrical_facets = two_arc_into_facets(line_vertex_id_list,circle_edge,face_normal_xyz,coo_array,whole_circle,bound)
+        
+                    else:
+                        cylindrical_lines = split_cylindrical_surface_into_lines(face_radius,face_center_xyz,face_normal_xyz,face_reference_direction_xyz,line_vertex_id_list,circle_edge,coo_array)
+                        #print(coo_array[[253, 403, 9, 13,16,254]])
+                        #print(cylindrical_lines)
+                        cylindrical_facets = pair_cylindrical_lines_into_facets(cylindrical_lines,coo_array,whole_circle)
+ 
+                    fc.ID = [len(face_list)+i for i in range(len(cylindrical_facets))]#把分割面与圆柱面关联
+                    face_list.extend(cylindrical_facets)
+                    for i in range(len(cylindrical_facets)):face_normal_list.append([face_normal_xyz,face_reference_direction_xyz])
+                            
+                elif fc.type == 'PLANE':
+                    edge_list = [line_vertex_id_list[edge] for edge in face_boudary_edge_list]
+                    #print(edge_list)
+                    face_bounds.extend(ct.edge_loop2point_loop(edge_list)) #convert line loop to vertex loop
+                    fc.stock_face = check_stock_face(face_center_xyz,face_normal_xyz,coo_array) #update stock face information
+                
+                else:
+                    raise NameError("检查面的定义%s"%fc.key)
+                bound.edge_index_list = face_boudary_edge_list
+            if len(face_bounds) > 0:
+                fc.ID=len(face_list)
+                face_list.append(face_bounds)
+                face_normal_list.append([face_normal_xyz,face_reference_direction_xyz])
+    
+        #check the hole in the face
+        self.hole_in_facets = find_hole(self,coo_array,face_list)          
+        #[print (fc) for fc in face_list]
+        #调整点序，保证 normal
+        face_normals,new_point_loop_list = ct.get_normal_from_model(coo_array,face_list)
+        
+        #同一平面两个面 touch 并且有共享点不涉及第三面
+        self.coo_array,self.facets = check_face_touches(coo_array,new_point_loop_list,face_normal_list,self)
+    
+        return self.coo_array,self.facets,self.hole_in_facets
+    
 class advanced_face():
     def __init__(self,data,key):
         self.ID = None
         self.key = key
         self.type = None
-        self.bounds = None
+        self.bounds = None # loop list
         self.face_geometry = None
+        self.stock_face = False
 
+class loop():
+    def __init__(self,data,key):
+        self.key = key
+        self.edge_list = None   #list of oriented_edge
+        self.type = None # 1,outer,-1,inner,0,hybrid
+        self.concavity = None # 1 convex, -1 concave, 0 hybrid, 2 transitional
+        self.edge_index_list = None # lsit of index in line_list
+
+class oriented_edge():
+    def __init__(self,data,key):
+        self.key = key
+        self.element = None   #edge_curve
+            
 class plane():
     def __init__(self,data,key):
         self.ID = None
@@ -103,32 +187,20 @@ class cylindrical_surface():
         self.normal = None
         self.reference_direction = None
 
-class loop():
-    def __init__(self,data,key):
-        self.key = key
-        self.edge_list = None  
-        self.type = None # 1,outer,-1,inner,0,hybrid
-        self.concavity = None # 1 convex, -1 concave, 0 hybrid, 2 transitional
-
-class oriented_edge():
-    def __init__(self,data,key):
-        self.key = key
-        self.start = None
-        self.end = None
-        self.element = None
-
 class edge_curve():
     def __init__(self,data,key):
         self.key = key
         self.start = None
         self.end = None
-        self.geometry = None
+        self.geometry = None #surface_curve or seam_curve
         self.type = None
+        self.simulation_points = None # list of points index in coo_array to simulate an arc
+        self.vertex_index = None # index in coo_array
         
 class surface_curve():
     def __init__(self,data,key):
         self.key = key
-        self.curve_3d = None
+        self.curve_3d = None # line or circle
         self.associated_geometry = None #LIST OF pcurve_or_surface
         self.type = None
   
@@ -146,7 +218,7 @@ class circle():
         self.center = None
         self.normal = None
         self.reference_direction = None
-
+        
 class pcurve():
     def __init__(self,data,key):
         self.key = key
@@ -439,7 +511,7 @@ def find_definitional_representation(data,definition_representation_key):
     return current_definitional_representation
             
 
-def find_hole(coo_array,facets):
+def find_hole(self,coo_array,facets):
     #定义洞
     hole_facets = []
     for fi,fc in enumerate(facets):
@@ -454,6 +526,9 @@ def find_hole(coo_array,facets):
             elif poly1.within(poly2): #poly1 是洞
                 hole_center = np.mean(coo_array[loop1], axis=0).flatten()
                 facets[fi] = loop2 + [-1] + loop1 #调换顺序
+                for advfc in self.faces:
+                    if advfc.ID == fi:
+                        advfc.bounds = [advfc.bounds[1],advfc.bounds[0]]
             else:
                 print('loop1 面积 %.2f, loop2 面积 %.2f'%(poly1.area,poly2.area))
                 print('loop2 在 loop1 中？',poly2.within(poly1))
@@ -468,13 +543,13 @@ def find_hole(coo_array,facets):
             hole_facets.append([])
     return hole_facets
 
-def check_face_touches(coo_array,facets,face_normal_list):
+def check_face_touches(coo_array,facets,face_normal_list,model):
     new_coo = np.copy(coo_array)
     new_facets = facets[:]
     c = 0
     while c != len(new_facets): # 当面的数量不再变化时，停止循环
         c = len(new_facets)
-        new_coo, new_facets = merge_face(new_coo,new_facets,face_normal_list) 
+        new_coo, new_facets = merge_face(new_coo,new_facets,face_normal_list,model) 
     return new_coo,new_facets
 
 def get_plane_3d_axis(norm_and_ref):
@@ -483,7 +558,7 @@ def get_plane_3d_axis(norm_and_ref):
     third_direction = np.cross(reference_direction,norm_direction)
     return np.array([norm_direction,reference_direction,third_direction]).T
     
-def merge_face(coo_array,facets,face_normal_list):
+def merge_face(coo_array,facets,face_normal_list,model):
     """
     当一个 polygon 包含另一个的所有点的时候，考虑合并他们
     """
@@ -492,6 +567,7 @@ def merge_face(coo_array,facets,face_normal_list):
         rest.remove(loop)
         for other in rest:
             if set(loop) < set(other): #被包含
+                other_id = facets.index(other)
                 #p1 = Polygon(coo_array[loop])
                 #p2 = Polygon(coo_array[other])                
                 
@@ -501,13 +577,51 @@ def merge_face(coo_array,facets,face_normal_list):
                 p2_2d = Polygon(ct.project_to_plane(coo_array[other],plane_3d_axis))
                 #if p1.touches(p2):
                 if p1_2d.touches(p2_2d): 
-                    new_coo,new_facets = remove_loop(loop,coo_array,facets) #去掉这个小面
+                    new_coo,new_facets = remove_loop(loop,coo_array,facets,model) #去掉这个小面
+                    update_face_in_model(model,other_id,i)
+                    update_face_id(model,i)
                     return new_coo,new_facets 
                 
     else: #循环走完时候返回
         return coo_array,facets
 
-def remove_loop(loop,coo_array,facets):
+def update_face_in_model(model,facet_merge,facet_remove):
+    """把两面相同边去除，不同边插入"""
+    for idx,fc in enumerate(model.faces):
+        if fc.ID == facet_remove:
+            face_remove = idx
+        if fc.ID == facet_merge:
+            face_merge = idx
+
+    l1 = model.faces[face_remove].bounds[0].edge_list
+    l2 = model.faces[face_merge].bounds[0].edge_list
+    remove_list = []
+    for i,edge in enumerate(l1):
+        for j,compare in enumerate(l2):
+            if is_same_edge(edge,compare):
+                remove_list.append(j)
+                break
+        else:
+            add = edge
+    #复核条件
+    if len(remove_list) + 1 == len(l1):
+        new_loop = l2[:]
+        new_loop[remove_list.pop()] = add
+        new_loop = [edge for idx,edge in enumerate(new_loop) if idx not in remove_list]
+        model.faces[face_merge].bounds[0].edge_list = new_loop
+    else:
+        raise NameError('面%d 和面%d 合并失败,插入边不是一条'%(facet_merge,facet_remove))
+    model.faces.pop(face_remove)
+
+def is_same_edge(e1,e2):
+    if e1.element.type == e2.element.type \
+       and e1.element.vertex_index == e2.element.vertex_index\
+       and set(e1.element.simulation_points) == set(e2.element.simulation_points):
+        return True
+    else:
+        return False
+
+def remove_loop(loop,coo_array,facets,model):
     new_coo = np.copy(coo_array)
     new_facets = facets[:]
     new_facets.remove(loop) #先去掉这个面
@@ -515,13 +629,14 @@ def remove_loop(loop,coo_array,facets):
     # 只有小面和大面独有的点被去除，以防影响第三面
     to_be_remove = [p for p in loop if flattened.count(p) == 2] 
     for i,p in enumerate(np.unique(to_be_remove)):
-        new_coo, new_facets = remove_point(p-i,new_coo,new_facets)        
+        new_coo, new_facets = remove_point(p-i,new_coo,new_facets,model)        
+        update_point_id(model,p-i)
     return new_coo,new_facets
 
-def remove_point(p,coo_array,facets):
+def remove_point(p,coo_array,facets,model):
     new_facets = []
     new_coo = np.delete(coo_array,p,0)
-    for loop in facets:
+    for face_index,loop in enumerate(facets):
         new_loop = []
         for x in loop:
             if x < p: #前面的点号不变
@@ -530,8 +645,48 @@ def remove_point(p,coo_array,facets):
                 new_loop.append(x-1) 
         if len(new_loop) > 0: # 空掉的 face去除
             new_facets.append(new_loop)
+        else:
+            update_face_id(model,face_index)
     return new_coo,new_facets
+
+def update_idx_list(idx,idx_list):
+    new_vidx_list =[]
+    for vidx in idx_list:
+        if vidx < idx: #前面的点号不变
+            new_vidx_list.append(vidx)
+        elif vidx > idx: #后面的点号减1
+            new_vidx_list.append(vidx-1) 
+    return new_vidx_list
+
+def update_point_id(model,pid):
+    """ 去除冗余面时，更新模型内对应circle point list id """
+    for fc in model.faces:
+        for loop in fc.bounds:
+            for oriented_edge in loop.edge_list:
+                edge_curv = oriented_edge.element
+                edge_curv.vertex_index = update_idx_list(pid,edge_curv.vertex_index)
+                if edge_curv.type == 'CIRCLE':
+                    edge_curv.simulation_points = update_idx_list(pid,edge_curv.simulation_points)
+    for lnid,line in enumerate(model.line_list):
+       model.line_list[lnid] =  update_idx_list(pid,line)
     
+def update_face_id(model,face_index):
+    """ 去除冗余面时，更新模型内对应面id """
+    for fc in model.faces:
+        if type(fc.ID) == list:
+            new_id = []
+            for i in fc.ID:
+                if i < face_index: #前面的点号不变
+                    new_id.append(i)
+                elif i > face_index: #后面的点号减1
+                    new_id.append(i-1) 
+            fc.ID = new_id
+        else:
+            if fc.ID > face_index:
+                fc.ID -= 1
+            elif fc.ID  == face_index:
+                fc.ID = None
+
 def get_vertex_list(model):
     pts_xyz_list = []
     pts_id_list = []
@@ -600,6 +755,7 @@ def get_line_list(model,mesh_length):
                 v2_key = endxyz.key
                 start_idx = pts_id_list.index(v1_key)
                 end_idx = pts_id_list.index(v2_key)
+                edge_curve.vertex_index = [start_idx,end_idx]
                 if edge_curve.key not in line_key_list:
                     line_key_list.append(edge_curve.key)
                     line_type_list.append(edge_curve.type)
@@ -643,8 +799,14 @@ def get_line_list(model,mesh_length):
                             line_vertex_list = [start_idx] + list(range(pts_number,pts_number+len(insert_points))) + [end_idx] #线段内点号重新定义
                         #保存
                         line_vertex_id_list.append(line_vertex_list);pts_xyz_list.extend(insert_points)
-                    else:
+                        edge_curve.simulation_points = line_vertex_list
+                    else: #plane
                         line_vertex_id_list.append([start_idx,end_idx])
+                        edge_curve.simulation_points = [start_idx,end_idx]
+                else: #line 已存在line_key_list
+                    edge_curve.simulation_points = line_vertex_id_list[line_key_list.index(edge_curve.key)]
+
+    model.line_list = line_vertex_id_list
     return line_key_list,line_type_list,line_vertex_id_list,pts_xyz_list
 
 def remove_extra_vertex_in_facet(half_facet,coo_array):
@@ -810,7 +972,7 @@ def split_cylindrical_surface_into_lines(face_radius,face_center_xyz,face_normal
             #print('-------------------------------')
     return cylindrical_lines
 
-def iscirclesame(ec1,ec2):   
+def is_same_circle(ec1,ec2):   
     c1 = ec1.geometry.curve_3d
     c2 = ec2.geometry.curve_3d
     r1 = c1.radius
@@ -840,7 +1002,7 @@ def check_whole_circle(circle_list):
         if ecidx not in [c for g in groups for c in g]:
             group = [ecidx];ecidx_list.pop(ecidx_list.index(ecidx))
             for other in ecidx_list[:]:
-                if iscirclesame(edge_curve,circle_list[other]):
+                if is_same_circle(edge_curve,circle_list[other]):
                     group.append(other)
                     ecidx_list.pop(ecidx_list.index(other))
             groups.append(group)
@@ -895,80 +1057,24 @@ def two_arc_into_facets(line_vertex_id_list,circle_edge,face_normal_xyz,coo_arra
     else:
         raise NameError("检查圆柱面的边界定义%s"%bound.edge_list) 
     return cylindrical_facets
-    
-def get_facets(model,mesh_length=1):
-    line_key_list,line_type_list,line_vertex_id_list,pts_xyz_list = get_line_list(model,mesh_length)
-    coo_array = np.array(pts_xyz_list) #方便加减
-    face_list = [];face_normal_list = []
-    for fc in model.faces:
-        face_center = fc.face_geometry.support_point    
-        face_center_xyz = np.array([face_center.x,face_center.y,face_center.z])
-        face_normal = fc.face_geometry.normal
-        face_normal_xyz = np.array([face_normal.x,face_normal.y,face_normal.z]) 
-        face_reference_direction = fc.face_geometry.reference_direction
-        face_reference_direction_xyz = np.array([face_reference_direction.x,face_reference_direction.y,face_reference_direction.z]) 
-        face_normal_list.append([face_normal_xyz,face_reference_direction_xyz])
-            
-        face_bounds = []
-        for bidx,bound in enumerate(fc.bounds):#find index of edge in line_list
-            face_boudary_edge_list = [];edge_curve_list = []
-            if bidx > 0: face_bounds.append(-1)            
-            for oriented_edge in bound.edge_list:
-                edge_curve = oriented_edge.element
-                edge_curve_list.append(edge_curve)
-                edge_curve_idx = line_key_list.index(edge_curve.key)
-                face_boudary_edge_list.append(edge_curve_idx)
 
-            if fc.type == 'CYLINDRICAL_SURFACE':
-                face_radius = fc.face_geometry.radius
-                # find out circle edge index 
-                circle_edge = [edge_idx for edge_idx in face_boudary_edge_list if line_type_list[edge_idx] == 'CIRCLE']
-                
-                #check if there is complete circle in the face
-                circle_list = [ec for ec in edge_curve_list if ec.type == 'CIRCLE']
-                whole_circle = check_whole_circle(circle_list) 
-                    
-                if len(circle_edge) == 2: #圆柱面只有2个圆弧
-                    cylindrical_facets = two_arc_into_facets(line_vertex_id_list,circle_edge,face_normal_xyz,coo_array,whole_circle,bound)
-    
-                else:
-                    cylindrical_lines = split_cylindrical_surface_into_lines(face_radius,face_center_xyz,face_normal_xyz,face_reference_direction_xyz,line_vertex_id_list,circle_edge,coo_array)
-                    #print(coo_array[[253, 403, 9, 13,16,254]])
-                    #print(cylindrical_lines)
-                    cylindrical_facets = pair_cylindrical_lines_into_facets(cylindrical_lines,coo_array,whole_circle)
-                face_list.extend(cylindrical_facets)
-                        
-            elif fc.type == 'PLANE':
-                edge_list = [line_vertex_id_list[edge] for edge in face_boudary_edge_list]
-                #print(edge_list)
-                face_bounds.extend(ct.edge_loop2point_loop(edge_list)) #convert line loop to vertex loop
-            else:
-                raise NameError("检查面的定义%s"%fc.key)
-        if len(face_bounds) > 0: face_list.append(face_bounds) 
-     
-    #print(face_list)   
-    hole_facets = None
-    #check the hole in the face
-    hole_facets = find_hole(coo_array,face_list)          
-    #[print (fc) for fc in face_list]
-    #调整点序，保证 normal
-    face_normals,new_point_loop_list = ct.get_normal_from_model(coo_array,face_list)
-    
-    #同一平面两个面 touch 并且有共享点不涉及第三面
-    coo_array,new_point_loop_list = check_face_touches(coo_array,new_point_loop_list,face_normal_list)
-    
-    return coo_array,new_point_loop_list,hole_facets
+def check_stock_face(face_center,norm,coo_array):
+    pts_dists = np.dot((coo_array-face_center),norm) 
+    fctype = ct.is_same_sign(np.sign(pts_dists))
+    return fctype
+
       
 if __name__ == "__main__": 
     import os
     import sys
     import geometry_builder as gb
     os.chdir(sys.path[0])
-    number = 287
-    path = '/Users/ting/OneDrive - University of South Carolina/New/Feature_Net/STEP/pocket_pocket/pocket1_pocket2_%d.step' %number
+    number = 12
+    path = 'STEP/pocket_pocket/pocket1_pocket2_%d.step' %number
+    path = '3D/blind_hole&pocket_%d.step'%number
     data = read_STEP(path)
     model = closed_shell(data)
-    coo_array,facets,hole_facets = get_facets(model)
+    coo_array,facets,hole_facets = model.get_facets()
     my_model = gb.solid_model(coo_array,facets,hole_facets,min_length=1.5)
     #[print(fc) for fc in facets]
     print ('总共%d 面，%d个点'%(len(facets),coo_array.shape[0]))

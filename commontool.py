@@ -140,9 +140,15 @@ def check_2dintersect(p1,p2):
     # print(list(p1.exterior.coords))
     # print(list(p2.exterior.coords))
     # print('--------')
-   
+    # print ('intersect',p1.intersects(p2),'touch', p1.touches(p2),'overlap', p1.overlaps(p2))
+    
+    
+    #圆弧和圆弧对比时，按理touch，但是有误差，增加面积复核    
     if p1.intersects(p2) and not p1.touches(p2):
-        return True
+        if p1.intersection(p2).area < 1e-9:
+            return False
+        else:
+            return True        
     else:
         return False
 
@@ -171,7 +177,8 @@ def check_normal_directions(base_plane,coo_array,point_loop_list,face_normals):
     length_on_base_normal  = []
     planes_on_base_normal = []
     for fcid,pts_list in enumerate(point_loop_list): #find out which plane parallel to xy and its distance
-        if project_on_base_nromal[fcid].size == 1:
+        if project_on_base_nromal[fcid].size == 1 \
+        or np.all(np.abs(np.diff(project_on_base_nromal[fcid]))<1e-10): #圆弧面有时候恰好平行 xyz
             length_on_base_normal.append(project_on_base_nromal[fcid][0]) # distance to xy plane
             planes_on_base_normal.append(fcid) # face id
     plane_numbers,plane_order = np.unique(length_on_base_normal,return_inverse=True)
@@ -183,7 +190,7 @@ def check_normal_directions(base_plane,coo_array,point_loop_list,face_normals):
                 for o in planes_on_base_normal]
     
     for pid in range(1,plane_numbers.size):# check overplap to determine normal direction
-        original_fids = faces_sets[pid] #original face id on the same plane
+        original_fids = faces_sets[pid] #original face id on the same plane        
         for ofid in original_fids:  
             any_overlap = False   
             original_norm = face_normals[ofid]      
@@ -193,6 +200,7 @@ def check_normal_directions(base_plane,coo_array,point_loop_list,face_normals):
                     polygons_on_base[planes_on_base_normal.index(pre_fid)]):
                         face_normals[ofid] = face_normals[pre_fid]*-1
                         any_overlap = True
+                        #print (ofid,pre_fid,face_normals[pre_fid])
                         break #当与前一个平面重叠时候，看做背靠背形成实体，所以 normal 相反
                 else: 
                     continue
@@ -221,11 +229,9 @@ def roll_until_equal(loop_list,normal,coo_array):
     while not np.array_equal(normal,new_norm):
         new_list = new_list[::-1] # swap pts order         
         new_norm = find_face_norm(new_list,coo_array)    
-        new_norm /= np.linalg.norm(new_norm) 
         if not np.array_equal(normal,new_norm): #check again
             new_list = np.roll(new_list,-1*counter-1) # roll 一下
             new_norm = find_face_norm(new_list,coo_array)
-            new_norm /= np.linalg.norm(new_norm) 
         counter += 1
         if counter > len(new_list):
             raise ValueError('面边界点定义错误！！！')
@@ -241,7 +247,6 @@ def get_normal_from_model(coo_array,point_loop_list):
     face_normals = []
     for fcid,pts_list in enumerate(point_loop_list):
         norm = find_face_norm(pts_list,coo_array)
-        norm /= np.linalg.norm(norm)
         pts_dists = np.dot((coo_array-coo_array[pts_list[0],:]),norm)
         fctype = is_same_sign(np.sign(pts_dists))
         is_stock_face.append(fctype)
@@ -272,7 +277,9 @@ def find_face_norm(face,pts_list):
         p4 = pts_list[face[start+1]]
         v2 = p4 - p3
         norm = np.cross(v1,v2) 
-        start +=1      
+        start +=1    
+    norm /= np.linalg.norm(norm)
+    norm[np.abs(norm)<1e-10] = 0  
     return norm
 
 def is_same_sign(v):
