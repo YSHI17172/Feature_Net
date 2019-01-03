@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import geometry_builder as gb
+import geometry_builder_iso as gb
 import datetime
 
 def mesh(feature_name,mesh_length=1,random_stock=False,model_only=False,
         stock_length = 100,stock_width=100, stock_height=100,
         sub_type=None):
-    
+    np.random.seed() #reset random seed
     if random_stock == True:
         # create a block with random size range from 0.1-0.9
         w1 = np.random.randint(100,1001)*stock_width/100 # 宽
@@ -25,7 +25,7 @@ def mesh(feature_name,mesh_length=1,random_stock=False,model_only=False,
     elif feature_name == 'pocket':
         pts_array,facets,hole_facets = pocket(w1,l1,h1)   
     elif feature_name == 'boss':
-        min_length = 2*mesh_length 
+        min_length = 1.5*mesh_length 
         pts_array,facets,hole_facets = boss(w1,l1,h1,mesh_length)
     elif feature_name == 'step':
         pts_array,facets = step(w1,l1,h1)
@@ -34,16 +34,16 @@ def mesh(feature_name,mesh_length=1,random_stock=False,model_only=False,
     elif feature_name == 'protrusion':
         pts_array,facets,hole_facets = protrusion(w1,l1,h1) 
     elif feature_name == 'through_hole':
-        min_length = 2*mesh_length 
+        min_length = 1.5*mesh_length 
         pts_array,facets,hole_facets = through_hole(w1,l1,h1,mesh_length)
     elif feature_name == 'blind_hole':
-        min_length = 2*mesh_length 
+        min_length = 1.5*mesh_length 
         pts_array,facets,hole_facets = blind_hole(w1,l1,h1,mesh_length)
     elif feature_name == 'cone':
-        min_length = 2*mesh_length 
+        min_length = 1.5*mesh_length 
         pts_array,facets,hole_facets = cone(w1,l1,h1,mesh_length)
     elif feature_name == 'dome':
-        min_length = 2*mesh_length 
+        min_length = 1.5*mesh_length 
         pts_array,facets,hole_facets,cpt_number = dome(w1,l1,h1,mesh_length)
             
     #generate mesh
@@ -51,13 +51,13 @@ def mesh(feature_name,mesh_length=1,random_stock=False,model_only=False,
     if model_only == False:
         coord_array,tri_array = model.generate_mesh(mesh_length=mesh_length)
     else:
-        coord_array = tri_array = []
+        coord_array = tri_array = np.array([])
     end_time = datetime.datetime.now()
     elapsed = (end_time-start_time).seconds
     print ("%s Mesh Created, has %d points, taken time %d seconds.\n"
     %(feature_name,coord_array.shape[0],elapsed))
     
-    return model,coord_array,tri_array,cpt_number,elapsed
+    return model,coord_array,tri_array
 
 def dome(w1,l1,h1,mesh_length):
     # 确定hole的参数
@@ -223,7 +223,7 @@ def cone(w1,l1,h1,mesh_length):
     (w1,l1,h1),#5
     (0,l1,h1),#6
     (0,0,h1),#7
-    (cx,cy,d2)#顶点8
+    (cx,cy,d2+h1)#顶点8
     ]    
    
     cpt_number = int(2*np.pi*r2/mesh_length)+1 #圆模拟点数 
@@ -442,7 +442,7 @@ def pyramid(w1,l1,h1):
     (fs,ls+l2,h1),#9
     (fs+w2,ls+l2,h1),#10
     (fs+w2,ls,h1),#11
-    (fs+w2/2,ls+l2/2,d2), #apex 12
+    (fs+w2/2,ls+l2/2,d2+h1), #apex 12
     (fs,ls+l2/2,h1), # 13
     (fs+w2/2,ls,h1), #14
     (fs+w2/2,ls+l2,h1),#15
@@ -625,7 +625,7 @@ def slot(w1,l1,h1):
     # 确定slot的参数
     w2 = np.random.randint(10*w1,90*w1)/100 # 宽
     d2 = np.random.randint(10*h1,90*h1)/100 # 深度
-    ls = np.random.randint(5*w1,95*w1-w2*100)/100 # 左边界
+    ls = np.random.randint(1*w1,95*w1-w2*100)/100 # 左边界
 
     # 定义各点
     pts = [(0,0,0), #0
@@ -662,9 +662,16 @@ def slot(w1,l1,h1):
     facets = f_bot+f_ls+f_rs+f_lt+f_f+f_b+f_sb+f_sl+f_sr   
     return pts_array,facets
 
+def to_parallelize(mesh_number,fname,path):
+    model,coord_array,tri_array = mesh(fname)    
+    np.savez_compressed(path+'/'+fname+'_%d'%(mesh_number), model = model,
+    coord_array=coord_array,tri_array=tri_array.astype(np.int)) 
+
 if __name__ == "__main__": 
     import os
     import sys
+    from multiprocessing import Pool, cpu_count
+    from functools import partial
     os.chdir(sys.path[0]) #change dir to main's path  
     #model,coord_array,tri_array = mesh('dome',mesh_length=1)
     
@@ -673,23 +680,20 @@ if __name__ == "__main__":
     #print ('feature has %d faces'%len(model.features[0].faces))
     #print (model.features[0].faces)    
 
-    fname = 'pyramid'
-    time = [];cpts = []
-    for mesh_number in range(0,32):
-        print ('Start to create mesh %d...'%mesh_number)
-        model,coord_array,tri_array,cpt,elapsed = mesh(fname)
-        np.savez_compressed('input_mesh/'+'/'+fname+'_%d'%(mesh_number), model = model,
-        coord_array=coord_array,tri_array=tri_array.astype(np.int))
-        cpts.append(cpt);time.append(elapsed)
-    np.savez_compressed('input_mesh/cpt_time%d'%mesh_number,cpts=cpts,time=time)
-        
-
-# 
-#     ## plot to check 
-#     from mayavi import mlab
-#     mlab.figure(figure="Mesh", bgcolor = (1,1,1), fgcolor = (0,0,0))
-#     #mlab.plot3d(pts[:, 0], pts[:, 1], pts[:, 2],)
-#     mlab.triangular_mesh(coord_array[:, 0], coord_array[:, 1], coord_array[:, 2], \
-#         tri_array,representation='wireframe', color=(0, 0, 0), opacity=0.5)
-#     mlab.show()
+    features = ['slot','step','pocket','through_hole','blind_hole',] 
+    features=['cone','pyramid','protrusion','boss']
+    n_jobs = cpu_count()
+    print ('using', n_jobs, 'cores')
     
+    for fname in features:
+        path = '/Volumes/HDD120/new_isolated/' + fname
+        try:           
+            os.mkdir(path)
+        except FileExistsError:
+            pass
+        to_parallelize_partial = partial(to_parallelize,fname=fname,path=path)
+        pool = Pool(processes=n_jobs)
+        pool.map(to_parallelize_partial, range(5000,10000))
+        pool.close()
+        pool.join()
+        

@@ -47,3 +47,23 @@ def read_dat(part_name):
     fileId.close()
     np.savez_compressed('temp/coo', coord_array=coord_array,tri_array=tri_array)
     return coord_array, tri_array
+
+if __name__ == "__main__":
+    import plot_mesh
+    import os
+    import sys
+    import find_planar_surf
+
+    #os.chdir(sys.path[0]) #change dir to main's path  
+
+    name = 'DEMO04_1.hh_0.5.dat'
+    path = 'test_case/mesh/%s'%name
+    p,t = read_dat(path)
+    print(p.shape,t.shape)
+
+    #plot_mesh.plot_mesh(p, t)
+    
+    label = np.load('test_case/label/%s_label.npz'%name)['label']
+    plan_surf = find_planar_surf.find_planar_surf_manually(p, t,label)
+    print(np.amax(label))
+    

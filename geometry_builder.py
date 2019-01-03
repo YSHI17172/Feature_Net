@@ -382,13 +382,21 @@ def find_line_angle(faces,line,pts_list):
     projection_on_face2 = np.dot(pts_list[pts1],norm2)
     projection_sign = np.sign(projection_on_face2 - np.dot(pts_list[pts2],norm2)[0])
     if np.unique(projection_sign).size > 2:# -1,0,1,face 2 切割了 face 1
-        pts3 = pts2;pts4 = pts1;convex_norm = norm1 #在face2中选点
+        projection_on_face1 = np.dot(pts_list[pts2],norm1)
+        projection_sign2 = np.sign(projection_on_face1 - np.dot(pts_list[pts1],norm1)[0])
+        if np.unique(projection_sign2).size > 2: #互切,选非圆底,另外一种方法是找圆心
+            if len(pts1) > len(pts2):
+                pts3 = pts2;pts4 = pts1;convex_norm = norm1 #在face2中选点
+            else:
+                pts3 = pts1;pts4 = pts2;convex_norm = norm2#在face1中选点
+        else:
+            pts3 = pts2;pts4 = pts1;convex_norm = norm1 #在face2中选点
     else:
         pts3 = pts1;pts4 = pts2;convex_norm = norm2#在face1中选点
     start = pts_list[line.start] ; end = pts_list[line.end]
     line_vector = line.vector/np.linalg.norm(line.vector)
     projection_on_edge = np.dot(pts_list[pts3],line_vector)
-    if np.amax(projection_on_edge) == np.dot(end,line_vector): #end为原 edge 点
+    if abs(np.amax(projection_on_edge) - np.dot(end,line_vector)) < 1e-9: #end为原 edge 点
         p1 = end
         p1_idx = pts3.index(line.end)
     else:
@@ -404,7 +412,7 @@ def find_line_angle(faces,line,pts_list):
     p2 = pts_list[p2_idx]
     convex = np.dot((p2-p1),convex_norm)
     
-    # if 7 in two_face:
+    # if 8 in two_face:
     #     print(two_face,p1,p2,convex)
 
     if convex < 0: #concave edge

@@ -74,7 +74,7 @@ def feature_extraction(solid,step_model,my_model):
                 and solid.faces[feature_face].stock_face == -1\
                 and step_or_slot_check(solid,feature_face)=='STEP':                    
                     current_feature = step_feature(solid,feature_face,step_faces_id_in_feature,entrance_normal)
-                    if len(current_feature.faces) > 1:
+                    if len(current_feature.walls) > 0:
                         decomposed_features.append(current_feature)
                 #pocket adj_face 没有stock face
                 elif np.allclose(solid.faces[feature_face].normal,entrance_normal) \
@@ -229,7 +229,7 @@ class slot_feature():
                 self.faces.append(adj_face);self.walls.append(adj_face)
             elif  adj_face in solid.face_id_in_intersecting_feature \
             and solid.faces[adj_face].type == 'PLANE' \
-            and ct.isParallel(solid.faces[adj_face].normal,entrance_normal)\
+            and is_same_plane(solid.faces[adj_face],solid.faces[key_face])\
             and face_width_check(solid,adj_face,self.width_direction,self.width):
                 self.faces.append(adj_face);self.base_plane.append(adj_face)
 
@@ -249,7 +249,7 @@ class step_feature():
                 self.faces.append(adj_face);self.walls.append(adj_face)
             elif  adj_face in solid.face_id_in_intersecting_feature \
             and solid.faces[adj_face].type == 'PLANE' \
-            and ct.isParallel(solid.faces[adj_face].normal,entrance_normal)\
+            and is_same_plane(solid.faces[adj_face],solid.faces[key_face])\
             and face_width_check(solid,adj_face,self.width_direction,self.width):
                 self.faces.append(adj_face);self.base_plane.append(adj_face)
 
@@ -310,7 +310,7 @@ class surface_in_feature():
         self.loop_list = [boundary_loop(solid,my_model,loop,self.normal) for loop in step_face.bounds] # list of loop objects
         self.vertex_list = find_vertex_list_in_face(self)
         self.stock_face = step_face.stock_face
-        self.adjacent_faces,self.angle_between_adjacent_faces= find_adj_faces(self,my_model,solid.face_id_dictionary) # id in step_model
+        self.adjacent_faces,self.angle_between_adjacent_faces,self.adj_face_stock= find_adj_faces(self,my_model,solid.face_id_dictionary) # id in step_model
         self.circle_list = [edge for loop in self.loop_list for edge in loop.edge_list if edge.type == 'CIRCLE']
         self.line_list = [edge for loop in self.loop_list for edge in loop.edge_list if edge.type == 'LINE']
         self.feature_character = find_surface_character(self)
@@ -327,18 +327,23 @@ def find_surface_character(self):
     if self.type == 'CYLINDRICAL_SURFACE':
         position_order = np.argsort([circle.position for circle in self.circle_list])  
         bottom_circle = self.circle_list[position_order[0]]
-        top_circle = self.circle_list[position_order[-1]]
-        seam_line_type = []
-        for ln in self.line_list: # 用直线辅助确认类型
-            if ln.geometry.length == top_circle.position - bottom_circle.position:
-                seam_line_type.append(ln.hks_character)
-
-        if abs(np.amax(bottom_circle.hks) - np.amin(top_circle.hks)) / np.amin(top_circle.hks) > 0.05\
-        or abs(np.amax(top_circle.hks) - np.amin(bottom_circle.hks)) / np.amin(bottom_circle.hks) > 0.05 \
-        or 1 in seam_line_type:
-            face_character = 'BLIND'
-        else:
+        # top_circle = self.circle_list[position_order[-1]]
+        # seam_line_type = []
+        # for ln in self.line_list: # 用直线辅助确认类型
+        #     if abs(ln.geometry.length - (top_circle.position - bottom_circle.position))<1e-10:
+        #         seam_line_type.append(ln.hks_character)
+        # 
+        # if (np.mean(bottom_circle.hks) - np.mean(top_circle.hks)) / np.mean(top_circle.hks) > 0.05\
+        # or 1 in seam_line_type:
+        #     face_character = 'BLIND'
+        # else:
+        #     face_character = 'THROUGH'
+            
+        if bottom_circle.position < 1e-13:
             face_character = 'THROUGH'
+        else:
+            face_character = 'BLIND'
+        
         
     elif self.type == 'PLANE':
         """
@@ -347,34 +352,37 @@ def find_surface_character(self):
         if all lines are directed clockwisely, the added number of a loop is 0
         """
         #line_characters = [ln.hks_character for ln in self.line_list] #不包含 circle
-        line_characters = [edge.hks_character for edge in self.loop_list[0].edge_list] # 包含 circle
-
-        if np.unique(line_characters)[0] == 1 and len(set(line_characters)) == 1: #被切过的墙，可能性1
-            face_character = 0
-        elif set(line_characters) == set([0,1])\
-        and len(line_characters)==6 and line_characters.count(0) ==1:#被切掉一角的墙,可能性1
-            face_character = 0
-        elif line_characters == [1,0, 1, 0, 1, 0, 1,0] or line_characters == [0,1, 0, 1, 0, 1, 0, 1,]:
-            face_character = 0
-        elif line_characters in [list(np.roll([1,1,1,0],i)) for i in range(4)]:#被切掉一条边的墙，可能性2
-            face_character = 0
-        elif line_characters in [list(np.roll([1,1,1,0,1,0],i)) for i in range(6)]:#被切掉一角的墙,可能性2
-            face_character = 0
-        elif line_characters in [list(np.roll([1,1,1,0,1,1,1,0],i)) for i in range(6)]:#凹型墙
-            face_character = 0
-        elif set(line_characters) == set([0,2]) or set(line_characters) == set([2]): #只有圆弧和对称直线，底面
-            face_character = 2
-        elif np.unique(line_characters)[0] == 0 and len(set(line_characters)) == 1: #stock face or bottom face
-            face_character = 2
-        elif line_characters == [0,1,0,1] or line_characters == [1,0,1,0]:
-            face_character = 1 # 没切过的墙，或者对边被切的base,要进一步确认normal
-        elif base_pattern(line_characters) :#被切过的底面
+#         line_characters = [edge.hks_character for edge in self.loop_list[0].edge_list] # 包含 circle
+# 
+#         if np.unique(line_characters)[0] == 1 and len(set(line_characters)) == 1: #被切过的墙，可能性1
+#             face_character = 0
+#         elif set(line_characters) == set([0,1])\
+#         and len(line_characters)==6 and line_characters.count(0) ==1:#被切掉一角的墙,可能性1
+#             face_character = 0
+#         elif line_characters == [1,0, 1, 0, 1, 0, 1,0] or line_characters == [0,1, 0, 1, 0, 1, 0, 1,]:
+#             face_character = 0
+#         elif line_characters in [list(np.roll([1,1,1,0],i)) for i in range(4)]:#被切掉一条边的墙，可能性2
+#             face_character = 0
+#         elif line_characters in [list(np.roll([1,1,1,0,1,0],i)) for i in range(6)]:#被切掉一角的墙,可能性2
+#             face_character = 0
+#         elif line_characters in [list(np.roll([1,1,1,0,1,1,1,0],i)) for i in range(6)]:#凹型墙
+#             face_character = 0
+#         elif set(line_characters) == set([0,2]) or set(line_characters) == set([2]): #只有圆弧和对称直线，底面
+#             face_character = 2
+#         elif np.unique(line_characters)[0] == 0 and len(set(line_characters)) == 1: #stock face or bottom face
+#             face_character = 2
+#         elif line_characters == [0,1,0,1] or line_characters == [1,0,1,0]:
+#             face_character = 1 # 没切过的墙，或者对边被切的base,要进一步确认normal
+#         elif base_pattern(line_characters) :#被切过的底面
+#             face_character = 3
+#         else: 
+        if np.allclose(self.normal,np.array([0,0,1])):
             face_character = 3
-        else: 
-            face_character = -1
-            print ('平面%d种类不明,法线方向%s，边线模式%s'%(self.ID,self.normal,line_characters))
+        else:
+            face_character = 0
+            #print ('平面%d种类不明,法线方向%s，边线模式%s'%(self.ID,self.normal,line_characters))
             #print ( [edge.hks for edge in self.loop_list[0].edge_list])
-        print(self.ID,self.normal,line_characters,face_character)
+        #print(self.ID,self.normal,line_characters,face_character)
     return face_character
 
 def base_pattern(alist): 
@@ -513,12 +521,14 @@ def find_adj_faces(self,my_model,face_id_dict):
         adj_faces,adj_face_index = np.unique([face for sub_face_id in self.ID for face in my_model.faces[sub_face_id].adjacent_faces if face not in self.ID],return_index=True)
         total_angles = np.array([my_model.faces[sub_face_id].angle_between_adjacent_face[face_index] for sub_face_id in self.ID for face_index,face in enumerate(my_model.faces[sub_face_id].adjacent_faces) if face not in self.ID])
         angle_between_adjacent_faces = total_angles[adj_face_index]
+        
     else:
         adj_faces = my_model.faces[self.ID].adjacent_faces
         angle_between_adjacent_faces = np.array(my_model.faces[self.ID].angle_between_adjacent_face)
-    
+        
+    adj_face_stock = np.array([my_model.faces[face].type for face in adj_faces])
     step_face_id_list,step_face_index = np.unique([face_id_dict[face_id] for face_id in adj_faces],return_index=True)
-    return step_face_id_list,angle_between_adjacent_faces[step_face_index]
+    return step_face_id_list,angle_between_adjacent_faces[step_face_index],adj_face_stock[step_face_index]
 
 def connect_face_id_between_model(model,step_model):
     # connect the face id between two model
@@ -556,55 +566,61 @@ if __name__ == "__main__":
     import sys
     os.chdir(sys.path[0])
     
-    fname = 0
+    aaa = [1, 12, 16, 23, 30, 33, 51, 55, 64, 65, 69, 70, 74, 83, 97, 98, 99, 103, 106, 113, 114, 120, 131, 137, 141, 162, 163, 171, 178, 180, 181, 185, 186, 187, 188, 193, 200, 207, 212, 219, 221, 228, 231, 246, 248, 249, 260, 263, 266, 267, 308, 313, 337, 338, 346, 352, 366, 371, 392, 393, 395, 398, 407, 410, 411, 412, 429, 436, 443, 449, 456, 475, 477, 478, 498, 517, 521, 535, 537, 541, 542, 553, 557, 573, 579, 580, 591, 603, 609, 641, 643, 649, 659, 663, 664, 676, 687, 690, 700, 707, 720, 723, 724, 726, 729, 738, 746, 750, 767, 774, 781, 787, 790, 800, 801, 814, 815, 826, 829, 835, 841, 863, 864, 867, 877, 879, 901, 903, 908, 914, 920, 928, 931, 941, 945, 951, 954, 958, 961, 963, 966, 967, 981, 986, 997, 1001, 1010, 1013, 1022, 1024, 1036, 1043, 1052, 1065, 1073, 1077, 1081, 1103, 1108, 1130, 1172, 1188, 1203, 1223, 1240, 1241, 1247, 1258, 1272, 1273, 1281, 1282, 1287, 1293, 1297, 1306, 1307, 1312, 1313, 1316, 1321, 1331, 1337, 1341, 1353, 1367, 1374, 1382, 1407, 1416, 1422, 1429, 1437, 1443, 1461, 1469, 1474, 1482, 1489, 1492, 1495, 1499, 1507, 1510, 1516, 1526, 1537, 1538, 1544, 1546, 1555, 1557, 1560, 1563, 1599, 1611, 1626, 1627, 1630, 1631, 1675, 1695, 1700, 1710, 1711, 1714, 1715, 1716, 1720, 1735, 1741, 1751, 1772, 1775, 1780, 1813, 1815, 1819, 1826, 1830, 1834, 1837, 1847, 1849, 1864, 1866, 1877, 1884, 1888, 1890, 1894, 1922, 1927, 1930, 1934, 1936, 1940, 1946, 1950, 1961, 1969, 1989, 2025, 2030, 2042, 2043, 2052, 2055, 2064, 2065, 2094, 2099, 2101, 2111, 2114, 2117, 2126, 2136, 2140, 2144, 2155, 2162, 2164, 2166, 2168, 2177, 2181, 2191, 2194, 2200, 2207, 2232, 2237, 2242, 2254, 2267, 2291, 2321, 2325, 2339, 2343, 2350, 2363, 2368, 2384, 2385, 2396, 2403, 2405, 2436, 2437, 2444, 2455, 2456, 2458, 2459, 2491, 2495, 2501, 2506, 2509, 2518, 2522, 2525, 2530, 2538, 2552, 2553, 2563, 2567, 2579, 2605, 2608, 2622, 2658, 2659, 2663, 2669, 2675, 2676, 2677, 2678, 2683, 2687, 2689, 2693, 2699, 2704, 2708, 2713, 2729, 2731, 2745, 2763, 2765, 2766, 2787, 2792, 2803, 2809, 2826, 2833, 2850, 2852, 2859, 2862, 2869, 2871, 2874, 2886, 2887, 2908, 2912, 2920, 2923, 2927, 2942, 2943, 2948, 2952, 2959, 2966, 2987, 2991, 2995, 2996, 3000, 3023, 3036, 3060, 3062, 3063, 3067, 3070, 3072, 3115, 3130, 3135, 3137, 3138, 3139, 3143, 3145, 3146, 3150, 3154, 3171, 3186, 3195, 3197, 3245, 3246, 3263, 3270, 3271, 3277, 3294, 3306, 3312, 3320, 3323, 3331, 3337, 3346, 3359, 3365, 3403, 3413, 3423, 3428, 3437, 3440, 3446, 3448, 3455, 3467, 3471, 3472, 3475, 3480, 3484, 3485, 3490, 3494, 3498, 3504, 3510, 3514, 3517, 3534, 3540, 3544, 3546, 3549, 3551, 3556, 3563, 3573, 3590, 3595, 3600, 3608, 3609, 3615, 3616, 3618, 3636, 3642, 3645, 3658, 3662, 3666, 3677, 3687, 3688, 3702, 3716, 3720, 3722, 3732, 3739, 3749, 3751, 3755, 3762, 3765, 3771, 3785, 3795, 3808, 3812, 3824, 3825, 3836, 3844, 3849, 3853, 3860, 3867, 3868, 3873, 3880, 3896, 3904, 3907, 3918, 3921, 3932, 3939, 3942, 3949, 3957, 3965, 3990, 4003, 4004, 4014, 4034, 4055, 4059, 4066, 4078, 4079, 4080, 4088, 4092, 4094, 4096, 4100, 4127, 4140, 4150, 4169, 4170, 4186, 4199, 4202, 4204, 4208, 4214, 4215, 4217, 4225, 4226, 4229, 4231, 4248, 4255, 4258, 4273, 4285, 4288, 4292, 4293, 4315, 4327, 4329, 4336, 4350, 4361, 4368, 4369, 4378, 4384, 4385, 4389, 4410, 4413, 4457, 4462, 4467, 4474, 4477, 4503, 4508, 4512, 4516, 4540, 4544, 4548, 4558, 4580, 4582, 4590, 4601, 4605, 4609, 4645, 4647, 4655, 4657, 4658, 4661, 4685, 4689, 4695, 4700, 4707, 4711, 4719, 4727, 4729, 4751, 4764, 4770, 4779, 4785, 4797, 4805, 4806, 4817, 4826, 4831, 4837, 4838, 4851, 4857, 4879, 4881, 4885, 4891, 4912, 4913, 4917, 4924, 4944, 4945, 4951, 4955, 4970, 4972, 4975, 4976, 4991, 4992, 4995, 4998]
     
-    # feature2 = 'pocket1_pocket2'
-    feature1 = 'blind_hole_blind_hole'
-    feature2 = 'blind_hole1_blind_hole2'
+    for fname in aaa :
     
-    #step_path = 'STEP/%s/%s_%d.step'%(feature1,feature2,fname)
+        # feature2 = 'pocket1_pocket2'
+        feature1 = 'blind_hole_pocket'
+        feature2 = 'blind_hole_pocket'
+        
+        # mesh_path = 'input_mesh/intersecting/%s/%s_%d.npz'%(feature1,feature2,fname)
+        # data = np.load(mesh_path)
+        # tri_array = data['tri_array'].astype(np.int32) ; coord_array = data['coord_array']
+        # step_model = data['step_model'][()];my_model = data['my_model'][()]
+        # data.close()
+        
+        step_path = 'STEP/%s/%s_%d.step' %(feature1,feature2,fname)
+        #step_path = '3D/%s_%d.step' %(feature2,fname)
+        step_data = read_STEP(step_path) 
+        step_model = closed_shell(step_data)
+        coo_array,facets,hole_facets = step_model.get_facets()
+        my_model = gb.solid_model(coo_array,facets,hole_facets,min_length=1.5)
+        
+        coord_array,tri_array = my_model.generate_mesh(mesh_length=1)
+        tri_array=tri_array.astype(np.int)
+        #save_path = 'input_mesh/intersecting_research/%s/%s_%d'%(feature2,feature2,fname)
+        #np.savez_compressed(save_path, step_model=step_model, my_model=my_model,
+        #coord_array=coord_array,tri_array=tri_array)
+        #print(len(my_model.faces)) 
+        
+        # # Calculate HKS
+        # HKS = generate_hks.generate_hks(coord_array, tri_array, 0.001, 1000)
+        # # Calculate persistence
+        # hks_persistence = persistence.persistence(HKS)
+        # np.save('temp/hks',hks_persistence)
+        
+        hks_path = '/Volumes/ExFAT256/clusters/%s/%s_%d.npz'%(feature1,feature2,fname)
+        hks_data = np.load(hks_path)  
+        hks_persistence = hks_data['persistence'];#adjpts = hks_data['adjpts']
+        hks_data.close()
+        
+        if coord_array.shape[0] != hks_persistence.shape[0]:
+            raise NameError ('点数不同!')
+        
     
-    mesh_path = 'input_mesh/intersecting/%s/%s_%d.npz'%(feature1,feature2,fname)
-    data = np.load(mesh_path)
-    tri_array = data['tri_array'].astype(np.int32) ; coord_array = data['coord_array']
-    step_model = data['step_model'][()];my_model = data['my_model'][()]
-    data.close()
-    
-    #step_path = 'STEP/%s/%s_%d.step' %(feature1,feature2,fname)
-    #step_path = '3D/%s_%d.step' %(feature2,fname)
-    # step_data = read_STEP(step_path) 
-    # step_model = closed_shell(step_data)
-    # coo_array,facets,hole_facets = step_model.get_facets()
-    # my_model = gb.solid_model(coo_array,facets,hole_facets,min_length=1.5)
-    # 
-    # coord_array,tri_array = my_model.generate_mesh(mesh_length=1)
-    # tri_array=tri_array.astype(np.int)
-    # save_path = 'input_mesh/intersecting_research/%s/%s_%d'%(feature2,feature2,fname)
-    # np.savez_compressed(save_path, step_model=step_model, my_model=my_model,
-    # coord_array=coord_array,tri_array=tri_array)
-    # print(len(my_model.faces)) 
-    
-    # # Calculate HKS
-    # HKS = generate_hks.generate_hks(coord_array, tri_array, 0.001, 1000)
-    # # Calculate persistence
-    # hks_persistence = persistence.persistence(HKS)
-    # np.save('temp/hks',hks_persistence)
-    
-    hks_path = '/Users/ting/Downloads/clusters/%s/%s_%d.npz'%(feature1,feature2,fname)
-    hks_data = np.load(hks_path)  
-    hks_persistence = hks_data['persistence'];adjpts = hks_data['adjpts']
-    hks_data.close()
-    
-    #hks_persistence = np.load('temp/hks.npy')
-    
-    #import plot_persistence
-    #plot_persistence.plot_persistence(coord_array, tri_array, hks_persistence, 'value')
-    
-    # get feature info
-    my_feature_model = feature_model(step_model,my_model,hks_persistence)
-    
-    print ('共有%d个feature'%len(my_feature_model.features))
-    print (my_feature_model.features)
-    for feature in my_feature_model.features:
-        print (feature.faces)
+        #hks_persistence = np.load('temp/hks.npy')
+        
+        #import plot_persistence
+        #plot_persistence.plot_persistence(coord_array, tri_array, hks_persistence, 'value')
+        
+        # get feature info
+        my_feature_model = feature_model(step_model,my_model,hks_persistence)
+        
+        if len(my_feature_model.features) != 2:
+            print ('%s共有%d个feature'%(fname,len(my_feature_model.features)))
+            print (my_feature_model.features)
+            for feature in my_feature_model.features:
+                print (feature.faces)
+            print('------------------')
 

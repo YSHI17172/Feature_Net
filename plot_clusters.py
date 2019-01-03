@@ -56,5 +56,5 @@ if __name__ == "__main__":
     clusters = np.load('temp/clusters.npz')['clusters']
     tri_array = data['tri_array'] ; coord_array = data['coord_array']
     data.close()
-    simil = [0.7, 0.75, 0.8, 0.85, 0.9] 
+    simil = [0.7, 0.75, 0.8, 0.85, 0.9,.95] 
     plot_clusters(coord_array, tri_array, clusters, simil)
