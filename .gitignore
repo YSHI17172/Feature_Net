@@ -32,10 +32,10 @@ node_modules
 /history
 /temp
 /adjm
-/2DCNN
 /3D
 /test
 /STEP
 /face_interaction
 /interactions_example_step
 /test_case
+/2DCNN/models
