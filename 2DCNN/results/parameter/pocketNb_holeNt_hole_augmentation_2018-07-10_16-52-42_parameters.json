@@ -1,0 +1,16 @@
+{
+    "batch_size": 32,
+    "dataset": "pocketNb_holeNt_hole",
+    "definition": 10,
+    "dim_ordering": "th",
+    "drop_rate": 0.3,
+    "my_optimizer": "adam",
+    "my_patience": 5,
+    "n_channels": 5,
+    "n_folds": 5,
+    "n_repeats": 3,
+    "nb_epochs": 50,
+    "p": "2",
+    "path_root": "/Users/User/Downloads/graph_2D_CNN/datasets/",
+    "q": "0.5"
+}
